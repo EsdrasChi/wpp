@@ -32,23 +32,38 @@ module.exports = function apiRoutes(sessionManager, upload) {
 
   // Enviar imagem
   router.post("/send/image", upload.single("file"), async (req, res) => {
-    const { sessionId, jid, caption } = req.body;
-    const result = await sessionManager.sendImage(sessionId, jid, req.file.path, caption);
-    res.json(result);
+    if (!req.file) return res.status(400).json({ success: false, message: "Nenhum arquivo enviado" });
+    try {
+      const { sessionId, jid, caption } = req.body;
+      const result = await sessionManager.sendImage(sessionId, jid, req.file.path, caption);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
   });
 
   // Enviar áudio
   router.post("/send/audio", upload.single("file"), async (req, res) => {
-    const { sessionId, jid } = req.body;
-    const result = await sessionManager.sendAudio(sessionId, jid, req.file.path);
-    res.json(result);
+    if (!req.file) return res.status(400).json({ success: false, message: "Nenhum arquivo enviado" });
+    try {
+      const { sessionId, jid } = req.body;
+      const result = await sessionManager.sendAudio(sessionId, jid, req.file.path);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
   });
 
   // Enviar documento
   router.post("/send/document", upload.single("file"), async (req, res) => {
-    const { sessionId, jid } = req.body;
-    const result = await sessionManager.sendDocument(sessionId, jid, req.file.path, req.file.originalname);
-    res.json(result);
+    if (!req.file) return res.status(400).json({ success: false, message: "Nenhum arquivo enviado" });
+    try {
+      const { sessionId, jid } = req.body;
+      const result = await sessionManager.sendDocument(sessionId, jid, req.file.path, req.file.originalname);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
   });
 
   // Upload CSV (CRM)
@@ -69,6 +84,12 @@ module.exports = function apiRoutes(sessionManager, upload) {
       .on("error", (err) => {
         res.status(500).json({ error: err.message });
       });
+  });
+
+  // Remover instância
+  router.delete("/sessions/:id", async (req, res) => {
+    const result = await sessionManager.removeSession(req.params.id);
+    res.json(result);
   });
 
   // Renomear instância

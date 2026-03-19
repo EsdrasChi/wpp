@@ -18,6 +18,12 @@ module.exports = function setupSocketHandler(io, sessionManager) {
       socket.emit("session:result", { sessionId: data.sessionId, ...result });
     });
 
+    socket.on("session:remove", async (data) => {
+      const result = await sessionManager.removeSession(data.sessionId);
+      socket.emit("session:result", { sessionId: data.sessionId, ...result });
+      io.emit("sessions:all", sessionManager.getStatuses());
+    });
+
     socket.on("session:rename", (data) => {
       const result = sessionManager.renameSession(data.sessionId, data.customName);
       socket.emit("session:renamed", { sessionId: data.sessionId, ...result });

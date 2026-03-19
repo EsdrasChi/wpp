@@ -195,6 +195,9 @@ function renderInstances() {
               ? `<button onclick="stopSession('${id}')" class="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 px-4 py-2 rounded-lg text-xs font-medium transition-colors">Desconectar</button>`
               : `<button onclick="startSession('${id}')" class="flex-1 bg-accent-500/10 hover:bg-accent-500/20 text-accent-400 px-4 py-2 rounded-lg text-xs font-medium transition-colors">Conectar</button>`
           }
+          <button onclick="removeSession('${id}')" class="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-2 rounded-lg text-xs transition-colors" title="Remover instância">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
         </div>
       </div>
     `;
@@ -217,6 +220,14 @@ function renameSession(sessionId) {
   const customName = input.value.trim();
   if (!customName) return;
   socket.emit("session:rename", { sessionId, customName });
+}
+
+function removeSession(sessionId) {
+  const idx = sessionId.split("-")[1];
+  const s = sessions[sessionId] || {};
+  const displayName = s.customName || s.name || `Instância ${idx}`;
+  if (!confirm(`Tem certeza que deseja remover "${displayName}"?\n\nIsso vai desconectar e apagar todos os dados dessa instância.`)) return;
+  socket.emit("session:remove", { sessionId });
 }
 
 // ─── QR Modal ───────────────────────────
@@ -359,28 +370,57 @@ function appendMessage(msg) {
   let content = "";
   switch (msg.type) {
     case "audio":
-      content = `
-        <div class="audio-player">
-          <button onclick="this.closest('.audio-player').querySelector('audio').paused ? this.closest('.audio-player').querySelector('audio').play() : this.closest('.audio-player').querySelector('audio').pause()">
-            <svg class="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-          </button>
-          <input type="range" value="0" min="0" max="100" />
-          <span class="text-[10px] text-gray-500">0:00</span>
-          <audio preload="none" src="${msg.mediaUrl || ""}"></audio>
+      if (msg.mediaUrl) {
+        content = `
+          <div class="audio-player" data-audio-url="${msg.mediaUrl}">
+            <button class="audio-play-btn" onclick="toggleAudio(this)">
+              <svg class="w-3.5 h-3.5 text-white play-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <svg class="w-3.5 h-3.5 text-white pause-icon hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+            </button>
+            <input type="range" value="0" min="0" max="100" class="audio-seek" oninput="seekAudio(this)" />
+            <span class="text-[10px] text-gray-500 audio-time">0:00</span>
+            <audio preload="metadata" src="${msg.mediaUrl}"></audio>
+          </div>`;
+      } else {
+        content = `<div class="flex items-center gap-2 py-1">
+          <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+          <span class="text-sm text-gray-400">[Audio]</span>
         </div>`;
+      }
       break;
     case "image":
-      content = msg.mediaUrl
-        ? `<img src="${msg.mediaUrl}" class="max-w-xs rounded-lg cursor-pointer" onclick="openMedia('${msg.mediaUrl}','image')" />`
-        : "";
+      if (msg.mediaUrl) {
+        content = `<img src="${msg.mediaUrl}" class="max-w-xs rounded-lg cursor-pointer" onclick="openMedia('${msg.mediaUrl}','image')" loading="lazy" />`;
+      } else {
+        content = `<div class="flex items-center gap-2 py-1">
+          <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <span class="text-sm text-gray-400">[Imagem]</span>
+        </div>`;
+      }
       if (msg.body && msg.body !== "[Image]") {
+        content += `<p class="text-sm mt-1">${escapeHtml(msg.body)}</p>`;
+      }
+      break;
+    case "video":
+      if (msg.mediaUrl) {
+        content = `<video src="${msg.mediaUrl}" controls class="max-w-xs rounded-lg" style="max-height:280px;"></video>`;
+      } else {
+        content = `<div class="flex items-center gap-2 py-1">
+          <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          <span class="text-sm text-gray-400">[Video]</span>
+        </div>`;
+      }
+      if (msg.body && msg.body !== "[Video]") {
         content += `<p class="text-sm mt-1">${escapeHtml(msg.body)}</p>`;
       }
       break;
     case "document":
       content = `<div class="flex items-center gap-2">
-        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-        <span class="text-sm">${escapeHtml(msg.body)}</span>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        ${msg.mediaUrl
+          ? `<a href="${msg.mediaUrl}" target="_blank" download class="text-sm text-accent-400 hover:underline">${escapeHtml(msg.body)}</a>`
+          : `<span class="text-sm">${escapeHtml(msg.body)}</span>`
+        }
       </div>`;
       break;
     default:
@@ -453,6 +493,92 @@ document.getElementById("chat-input").addEventListener("keydown", (e) => {
     sendMessage();
   }
 });
+
+// ─── Send File (image/audio/document) ───
+function setupFileInputs() {
+  ["image", "audio", "document"].forEach((type) => {
+    const input = document.getElementById(`file-${type}`);
+    if (!input) return;
+    input.addEventListener("change", async function () {
+      const file = this.files[0];
+      if (!file) return;
+      await handleFileSend(type, file);
+      this.value = "";
+    });
+  });
+}
+
+async function handleFileSend(type, file) {
+  if (!currentChatJid) {
+    alert("Abra um chat primeiro");
+    return;
+  }
+
+  const sessionId = document.getElementById("send-session-select").value;
+  if (!sessionId) {
+    alert("Selecione uma instância conectada");
+    return;
+  }
+
+  const sess = sessions[sessionId];
+  if (!sess || sess.status !== "open") {
+    alert("A instância selecionada não está conectada. Escolha outra no dropdown.");
+    return;
+  }
+
+  // Clear welcome screen if present
+  const msgsEl = document.getElementById("chat-messages");
+  if (msgsEl && msgsEl.querySelector(".flex.flex-col.items-center")) {
+    msgsEl.innerHTML = "";
+  }
+
+  // Show upload status
+  const uploadStatus = document.getElementById("upload-status");
+  const uploadText = document.getElementById("upload-status-text");
+  const typeLabels = { image: "imagem", audio: "áudio", document: "documento" };
+  if (uploadStatus) {
+    uploadText.textContent = `Enviando ${typeLabels[type] || "arquivo"}: ${file.name}...`;
+    uploadStatus.classList.remove("hidden");
+  }
+
+  const fd = new FormData();
+  fd.append("sessionId", sessionId);
+  fd.append("jid", currentChatJid);
+  fd.append("file", file);
+  if (type === "image") fd.append("caption", "");
+
+  try {
+    const endpoint = `/api/send/${type}`;
+    const res = await fetch(endpoint, { method: "POST", body: fd });
+    const data = await res.json();
+
+    if (data.success) {
+      const msgBody = type === "image" ? (file.name || "[Image]")
+        : type === "audio" ? "[Audio]"
+        : (file.name || "[Document]");
+
+      appendMessage({
+        id: Date.now().toString(),
+        sessionId,
+        chatJid: currentChatJid,
+        fromMe: true,
+        pushName: "",
+        type,
+        body: msgBody,
+        mediaUrl: data.mediaUrl || null,
+        timestamp: Date.now(),
+      });
+      scrollMessagesToBottom();
+    } else {
+      alert("Erro ao enviar: " + (typeof data.message === "string" ? data.message : "Falha no envio"));
+    }
+  } catch (err) {
+    alert("Erro ao enviar arquivo: " + err.message);
+  }
+
+  // Hide upload status
+  if (uploadStatus) uploadStatus.classList.add("hidden");
+}
 
 // ─── Session Dropdowns ──────────────────
 function populateSessionDropdowns() {
@@ -730,16 +856,9 @@ function renderContactsView() {
 
   listEl.innerHTML = filtered.map((c) => {
     const initials = c.nome ? c.nome.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() : c.numero.slice(-2);
-    const contactedInfo = c.contacted && c.contactedVia
-      ? `<div class="flex items-center gap-1.5 mt-2">
-           <span class="inst-badge ${(INSTANCE_COLORS[c.contactedVia] || {bg:"inst-badge-1"}).bg}">${(INSTANCE_COLORS[c.contactedVia] || {label:"?"}).label}</span>
-           <span class="text-[10px] text-gray-600">${c.contactedAt ? formatTime(c.contactedAt) : ""}</span>
-         </div>`
-      : "";
+    const safeNome = (c.nome || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 
     if (contactTab === "pending") {
-      // Escapar nome para uso seguro em atributo onclick
-      const safeNome = (c.nome || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
       return `
         <div class="contact-card bg-surface-900 border border-white/5 rounded-xl p-4"
              onclick="openInstancePicker('${safeNome}', '${c.numero}')">
@@ -759,21 +878,26 @@ function renderContactsView() {
         </div>
       `;
     } else {
+      const viaColors = INSTANCE_COLORS[c.contactedVia] || { bg: "inst-badge-1", label: "?" };
       return `
-        <div class="bg-surface-900 border border-white/5 rounded-xl p-4 opacity-75">
+        <div class="contact-card bg-surface-900 border border-white/5 rounded-xl p-4"
+             onclick="openChatFromContact('${c.numero}')">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-full bg-green-500/15 flex items-center justify-center text-green-400 text-sm font-semibold shrink-0">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              ${initials}
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-gray-300 truncate">${escapeHtml(c.nome || "Sem nome")}</p>
-              <p class="text-xs text-gray-600 font-mono">${escapeHtml(c.numero)}</p>
-              ${contactedInfo}
+              <p class="text-sm font-medium text-white truncate">${escapeHtml(c.nome || "Sem nome")}</p>
+              <p class="text-xs text-gray-500 font-mono">${escapeHtml(c.numero)}</p>
+              ${c.contactedVia ? `<div class="flex items-center gap-1.5 mt-1.5">
+                <span class="inst-badge ${viaColors.bg}">${viaColors.label}</span>
+                <span class="text-[10px] text-gray-600">${c.contactedAt ? formatTime(c.contactedAt) : ""}</span>
+              </div>` : ""}
             </div>
-            <button onclick="event.stopPropagation(); openChatFromContact('${c.numero}')"
-              class="text-[10px] text-gray-500 hover:text-accent-400 transition-colors px-2 py-1 rounded hover:bg-white/5">
-              Ver conversa
-            </button>
+            <div class="flex items-center gap-1 text-green-400">
+              <span class="text-[10px] font-medium">Conversar</span>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+            </div>
           </div>
         </div>
       `;
@@ -782,10 +906,27 @@ function renderContactsView() {
 }
 
 function openChatFromContact(numero) {
-  const jid = numero.replace(/\D/g, "") + "@s.whatsapp.net";
+  const clean = numero.replace(/\D/g, "");
+  const jid = clean + "@s.whatsapp.net";
+
+  // Buscar instância usada anteriormente
+  const contact = leads.find((l) => l.numero === clean);
+  if (contact && contact.contactedVia) {
+    pendingSessionForChat = contact.contactedVia;
+  }
+
   currentChatJid = jid;
   switchView("inbox");
   openChat(jid);
+
+  // Setar dropdown com a instância correta
+  if (pendingSessionForChat) {
+    setTimeout(() => {
+      const sendSelect = document.getElementById("send-session-select");
+      if (sendSelect) sendSelect.value = pendingSessionForChat;
+      pendingSessionForChat = null;
+    }, 200);
+  }
 }
 
 function updatePendingBadge() {
@@ -871,6 +1012,58 @@ function closeInstancePicker() {
   pickerContact = null;
 }
 
+// ─── Audio Player ───────────────────────
+function toggleAudio(btn) {
+  const player = btn.closest(".audio-player");
+  const audio = player.querySelector("audio");
+  const playIcon = btn.querySelector(".play-icon");
+  const pauseIcon = btn.querySelector(".pause-icon");
+  const seek = player.querySelector(".audio-seek");
+  const timeEl = player.querySelector(".audio-time");
+
+  if (audio.paused) {
+    // Pausar todos os outros áudios
+    document.querySelectorAll(".audio-player audio").forEach((a) => {
+      if (a !== audio && !a.paused) {
+        a.pause();
+        const otherPlayer = a.closest(".audio-player");
+        otherPlayer.querySelector(".play-icon").classList.remove("hidden");
+        otherPlayer.querySelector(".pause-icon").classList.add("hidden");
+      }
+    });
+    audio.play();
+    playIcon.classList.add("hidden");
+    pauseIcon.classList.remove("hidden");
+
+    audio.ontimeupdate = () => {
+      if (audio.duration) {
+        seek.value = (audio.currentTime / audio.duration) * 100;
+        const m = Math.floor(audio.currentTime / 60);
+        const s = Math.floor(audio.currentTime % 60).toString().padStart(2, "0");
+        timeEl.textContent = `${m}:${s}`;
+      }
+    };
+    audio.onended = () => {
+      playIcon.classList.remove("hidden");
+      pauseIcon.classList.add("hidden");
+      seek.value = 0;
+      timeEl.textContent = "0:00";
+    };
+  } else {
+    audio.pause();
+    playIcon.classList.remove("hidden");
+    pauseIcon.classList.add("hidden");
+  }
+}
+
+function seekAudio(rangeEl) {
+  const player = rangeEl.closest(".audio-player");
+  const audio = player.querySelector("audio");
+  if (audio.duration) {
+    audio.currentTime = (rangeEl.value / 100) * audio.duration;
+  }
+}
+
 // ─── Media Modal ────────────────────────
 function openMedia(url, type) {
   const modal = document.getElementById("media-modal");
@@ -914,3 +1107,4 @@ function escapeHtml(text) {
 // ─── Init ───────────────────────────────
 switchView("inbox");
 loadSavedContacts();
+setupFileInputs();

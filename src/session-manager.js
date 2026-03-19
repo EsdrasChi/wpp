@@ -4,6 +4,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  downloadMediaMessage,
 } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const path = require("path");
@@ -28,6 +29,7 @@ class SessionManager {
     this.retryCount = new Map();
     this.messageStore = new Map(); // sessionId -> Map(chatJid -> messages[])
     this.customNames = new Map(); // sessionId -> user-defined label
+    this.sentMediaUrls = new Map(); // msgId -> mediaUrl (para fromMe)
     this.contacts = []; // manual contacts list
     this.logger = pino({ level: process.env.LOG_LEVEL || "error" });
     fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -173,15 +175,19 @@ class SessionManager {
       });
 
       // ── Eventos de mensagem ──
-      sock.ev.on("messages.upsert", ({ messages: msgs, type }) => {
+      sock.ev.on("messages.upsert", async ({ messages: msgs, type }) => {
         if (type !== "notify") return;
         for (const msg of msgs) {
           if (msg.key.fromMe && !msg.message) continue;
-          this._storeMessage(sessionId, msg);
-          this.io.emit("message:new", {
-            sessionId,
-            message: this._formatMessage(sessionId, msg),
-          });
+          const formatted = await this._storeMessage(sessionId, msg);
+          if (!formatted) continue;
+          // Não emitir fromMe — o frontend já mostra localmente
+          if (!msg.key.fromMe) {
+            this.io.emit("message:new", {
+              sessionId,
+              message: formatted,
+            });
+          }
         }
       });
 
@@ -262,6 +268,24 @@ class SessionManager {
     return { success: true, message: "Disconnected" };
   }
 
+  // ── Remover instância completamente ──
+  async removeSession(sessionId) {
+    const sess = this.sessions.get(sessionId);
+    if (sess) {
+      try { await sess.sock.logout(); } catch (_) {}
+      try { sess.sock.end(); } catch (_) {}
+    }
+    this.sessions.delete(sessionId);
+    this.retryCount.delete(sessionId);
+    this.messageStore.delete(sessionId);
+    this.customNames.delete(sessionId);
+    this._saveData();
+    const sessionPath = path.join(SESSION_DIR, sessionId);
+    fs.rmSync(sessionPath, { recursive: true, force: true });
+    this._emitStatus(sessionId, "disconnected");
+    return { success: true, message: "Instância removida" };
+  }
+
   _clearSession(sessionId) {
     const sess = this.sessions.get(sessionId);
     if (sess) {
@@ -310,7 +334,9 @@ class SessionManager {
         image: buffer,
         caption: caption || "",
       });
-      return { success: true, message: sent };
+      const mediaUrl = `/uploads/${path.basename(filePath)}`;
+      if (sent?.key?.id) this.sentMediaUrls.set(sent.key.id, mediaUrl);
+      return { success: true, message: sent, mediaUrl };
     } catch (err) {
       return { success: false, message: err.message };
     }
@@ -322,12 +348,17 @@ class SessionManager {
     try {
       const formattedJid = this._formatJid(jid);
       const buffer = fs.readFileSync(filePath);
+      const mime = require("mime-types");
+      const detectedMime = mime.lookup(filePath) || "audio/mpeg";
+      const isOgg = filePath.endsWith(".ogg") || filePath.endsWith(".opus");
       const sent = await sess.sock.sendMessage(formattedJid, {
         audio: buffer,
-        mimetype: "audio/ogg; codecs=opus",
-        ptt: true,
+        mimetype: isOgg ? "audio/ogg; codecs=opus" : detectedMime,
+        ptt: isOgg,
       });
-      return { success: true, message: sent };
+      const mediaUrl = `/uploads/${path.basename(filePath)}`;
+      if (sent?.key?.id) this.sentMediaUrls.set(sent.key.id, mediaUrl);
+      return { success: true, message: sent, mediaUrl };
     } catch (err) {
       return { success: false, message: err.message };
     }
@@ -346,24 +377,72 @@ class SessionManager {
         mimetype,
         fileName: fileName || path.basename(filePath),
       });
-      return { success: true, message: sent };
+      const mediaUrl = `/uploads/${path.basename(filePath)}`;
+      if (sent?.key?.id) this.sentMediaUrls.set(sent.key.id, mediaUrl);
+      return { success: true, message: sent, mediaUrl };
     } catch (err) {
       return { success: false, message: err.message };
     }
   }
 
   // ── Mensagem Store ──
-  _storeMessage(sessionId, msg) {
+  async _storeMessage(sessionId, msg) {
     const chatJid = msg.key.remoteJid;
-    if (!chatJid) return;
+    if (!chatJid) return null;
     if (!this.messageStore.has(sessionId)) {
       this.messageStore.set(sessionId, new Map());
     }
     const chatMap = this.messageStore.get(sessionId);
     if (!chatMap.has(chatJid)) chatMap.set(chatJid, []);
     const arr = chatMap.get(chatJid);
-    arr.push(this._formatMessage(sessionId, msg));
-    if (arr.length > 200) arr.shift(); // manter últimas 200 por chat
+    const formatted = this._formatMessage(sessionId, msg);
+
+    const isMedia = ["image", "video", "audio", "document", "sticker"].includes(formatted.type);
+
+    if (isMedia) {
+      if (msg.key.fromMe) {
+        // Para mensagens enviadas, usar a URL do upload local
+        if (this.sentMediaUrls.has(msg.key.id)) {
+          formatted.mediaUrl = this.sentMediaUrls.get(msg.key.id);
+          this.sentMediaUrls.delete(msg.key.id);
+        }
+      } else {
+        // Para mensagens recebidas, baixar a mídia
+        try {
+          const buffer = await downloadMediaMessage(msg, "buffer", {});
+          if (buffer) {
+            const ext = this._getMediaExtension(formatted.type, msg.message);
+            const filename = `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+            const uploadsDir = path.join(__dirname, "..", "uploads");
+            fs.mkdirSync(uploadsDir, { recursive: true });
+            fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+            formatted.mediaUrl = `/uploads/${filename}`;
+          }
+        } catch (err) {
+          console.error(`[${sessionId}] Media download error:`, err.message);
+        }
+      }
+    }
+
+    arr.push(formatted);
+    if (arr.length > 200) arr.shift();
+    return formatted;
+  }
+
+  _getMediaExtension(type, content) {
+    if (!content) return "";
+    switch (type) {
+      case "image": return (content.imageMessage?.mimetype || "").includes("png") ? ".png" : ".jpg";
+      case "video": return ".mp4";
+      case "audio": return ".ogg";
+      case "document": {
+        const mime = require("mime-types");
+        const ext = mime.extension(content.documentMessage?.mimetype || "");
+        return ext ? `.${ext}` : "";
+      }
+      case "sticker": return ".webp";
+      default: return "";
+    }
   }
 
   _formatMessage(sessionId, msg) {
