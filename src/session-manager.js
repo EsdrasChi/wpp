@@ -218,8 +218,15 @@ class SessionManager {
 
   // ── Iniciar instância ──
   async startSession(sessionId) {
-    if (this.sessions.has(sessionId) && this.sessions.get(sessionId).status === "open") {
+    const existing = this.sessions.get(sessionId);
+    if (existing && existing.status === "open") {
       return { success: false, message: "Session already connected" };
+    }
+
+    // Limpar socket anterior se existir (evita sockets duplicados na reconexão)
+    if (existing?.sock) {
+      try { existing.sock.ev.removeAllListeners(); } catch (_) {}
+      try { existing.sock.end(); } catch (_) {}
     }
 
     this._emitStatus(sessionId, "connecting");
@@ -292,6 +299,10 @@ class SessionManager {
   _handleConnectionUpdate(sessionId, sock, update, saveCreds) {
     const { connection, lastDisconnect, qr } = update;
 
+    // Ignorar eventos de sockets antigos (já substituídos por reconexão)
+    const currentSess = this.sessions.get(sessionId);
+    if (currentSess && currentSess.sock !== sock) return;
+
     if (qr) {
       QRCode.toDataURL(qr, { width: 280, margin: 2 })
         .then((url) => {
@@ -318,16 +329,26 @@ class SessionManager {
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
       const reason = DisconnectReason;
+      const MAX_RETRIES = 10;
 
-      if (code === reason.loggedOut) {
+      if (code === reason.loggedOut || code === reason.forbidden) {
         this._clearSession(sessionId);
         this._emitStatus(sessionId, "disconnected");
-        console.log(`[${sessionId}] Logged out. Session cleared.`);
+        console.log(`[${sessionId}] Logged out (code ${code}). Session cleared.`);
       } else {
         const retries = (this.retryCount.get(sessionId) || 0) + 1;
         this.retryCount.set(sessionId, retries);
+
+        if (retries > MAX_RETRIES) {
+          console.log(`[${sessionId}] Max retries (${MAX_RETRIES}) reached. Clearing session.`);
+          this._clearSession(sessionId);
+          this._emitStatus(sessionId, "disconnected");
+          this.retryCount.set(sessionId, 0);
+          return;
+        }
+
         const delay = Math.min(1000 * Math.pow(2, retries), 60000);
-        console.log(`[${sessionId}] Reconnecting in ${delay}ms (attempt ${retries})...`);
+        console.log(`[${sessionId}] Reconnecting in ${delay}ms (attempt ${retries}/${MAX_RETRIES}, code: ${code})...`);
         this._emitStatus(sessionId, "reconnecting");
         setTimeout(() => this.startSession(sessionId), delay);
       }
@@ -339,7 +360,10 @@ class SessionManager {
     const sess = this.sessions.get(sessionId);
     if (!sess) return { success: false, message: "Session not found" };
     try {
-      await sess.sock.logout();
+      if (sess.sock) {
+        sess.sock.ev.removeAllListeners();
+        await sess.sock.logout();
+      }
     } catch (e) {
       try { sess.sock.end(); } catch (_) {}
     }
@@ -351,7 +375,8 @@ class SessionManager {
   // ── Remover instância completamente ──
   async removeSession(sessionId) {
     const sess = this.sessions.get(sessionId);
-    if (sess) {
+    if (sess?.sock) {
+      try { sess.sock.ev.removeAllListeners(); } catch (_) {}
       try { await sess.sock.logout(); } catch (_) {}
       try { sess.sock.end(); } catch (_) {}
     }
@@ -368,10 +393,12 @@ class SessionManager {
 
   _clearSession(sessionId) {
     const sess = this.sessions.get(sessionId);
-    if (sess) {
+    if (sess?.sock) {
+      try { sess.sock.ev.removeAllListeners(); } catch (_) {}
       try { sess.sock.end(); } catch (_) {}
     }
     this.sessions.delete(sessionId);
+    this.retryCount.delete(sessionId);
     const sessionPath = path.join(SESSION_DIR, sessionId);
     fs.rmSync(sessionPath, { recursive: true, force: true });
   }
