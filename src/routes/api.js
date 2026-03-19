@@ -93,67 +93,72 @@ module.exports = function apiRoutes(sessionManager, upload) {
   });
 
   // Renomear instância
-  router.post("/sessions/:id/rename", (req, res) => {
+  router.post("/sessions/:id/rename", async (req, res) => {
     const { customName } = req.body;
-    const result = sessionManager.renameSession(req.params.id, customName);
+    const result = await sessionManager.renameSession(req.params.id, customName);
     res.json(result);
   });
 
   // Contatos manuais
-  router.get("/contacts", (req, res) => {
-    res.json(sessionManager.getContacts());
+  router.get("/contacts", async (req, res) => {
+    const contacts = await sessionManager.getContacts();
+    res.json(contacts);
   });
 
-  router.post("/contacts", (req, res) => {
+  router.post("/contacts", async (req, res) => {
     const { nome, numero } = req.body;
-    const result = sessionManager.addContact(nome, numero);
+    const result = await sessionManager.addContact(nome, numero);
     res.json(result);
   });
 
-  router.delete("/contacts/:numero", (req, res) => {
-    const result = sessionManager.removeContact(req.params.numero);
+  router.delete("/contacts/:numero", async (req, res) => {
+    const result = await sessionManager.removeContact(req.params.numero);
     res.json(result);
   });
 
-  router.get("/contacts/pending", (req, res) => {
-    res.json(sessionManager.getPendingContacts());
+  router.get("/contacts/pending", async (req, res) => {
+    const contacts = await sessionManager.getPendingContacts();
+    res.json(contacts);
   });
 
-  router.get("/contacts/contacted", (req, res) => {
-    res.json(sessionManager.getContactedContacts());
+  router.get("/contacts/contacted", async (req, res) => {
+    const contacts = await sessionManager.getContactedContacts();
+    res.json(contacts);
   });
 
-  router.post("/contacts/:numero/mark-contacted", (req, res) => {
+  router.post("/contacts/:numero/mark-contacted", async (req, res) => {
     const { sessionId } = req.body;
-    const result = sessionManager.markContacted(req.params.numero, sessionId);
+    const result = await sessionManager.markContacted(req.params.numero, sessionId);
     res.json(result);
   });
 
   // Kanban
-  router.get("/kanban", (req, res) => {
-    res.json(sessionManager.getKanbanBoard());
+  router.get("/kanban", async (req, res) => {
+    const board = await sessionManager.getKanbanBoard();
+    res.json(board);
   });
 
-  router.post("/contacts/:numero/stage", (req, res) => {
+  router.post("/contacts/:numero/stage", async (req, res) => {
     const { stage } = req.body;
-    const result = sessionManager.updateContactStage(req.params.numero, stage);
+    const result = await sessionManager.updateContactStage(req.params.numero, stage);
     res.json(result);
   });
 
-  router.post("/contacts/:numero/notes", (req, res) => {
+  router.post("/contacts/:numero/notes", async (req, res) => {
     const { notes } = req.body;
-    const result = sessionManager.updateContactNotes(req.params.numero, notes);
+    const result = await sessionManager.updateContactNotes(req.params.numero, notes);
     res.json(result);
   });
 
   // Chats
-  router.get("/chats", (req, res) => {
-    res.json(sessionManager.getChats());
+  router.get("/chats", async (req, res) => {
+    const chats = await sessionManager.getChats();
+    res.json(chats);
   });
 
   // Mensagens de um chat
-  router.get("/chats/:jid/messages", (req, res) => {
-    const msgs = sessionManager.getChatMessages(req.params.jid);
+  router.get("/chats/:jid/messages", async (req, res) => {
+    const msgs = await sessionManager.getChatMessages(req.params.jid);
     res.json(msgs);
   });
 

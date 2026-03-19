@@ -10,6 +10,7 @@ const pino = require("pino");
 const path = require("path");
 const fs = require("fs");
 const QRCode = require("qrcode");
+const db = require("./database");
 
 const SESSION_DIR = path.resolve(process.env.SESSION_DIR || "./sessions");
 const MAX_INSTANCES = parseInt(process.env.MAX_INSTANCES || "5", 10);
@@ -28,21 +29,69 @@ class SessionManager {
     this.io = io;
     this.sessions = new Map();
     this.retryCount = new Map();
-    this.messageStore = new Map(); // sessionId -> Map(chatJid -> messages[])
-    this.customNames = new Map(); // sessionId -> user-defined label
-    this.sentMediaUrls = new Map(); // msgId -> mediaUrl (para fromMe)
-    this.contacts = []; // manual contacts list
+    this.messageStore = new Map(); // cache em memória: sessionId -> Map(chatJid -> messages[])
+    this.customNames = new Map();
+    this.sentMediaUrls = new Map();
+    this.contacts = []; // cache local
     this.logger = pino({ level: process.env.LOG_LEVEL || "error" });
     fs.mkdirSync(SESSION_DIR, { recursive: true });
-    this._loadData();
   }
 
-  // ── Persistir dados locais (nomes + contatos) ──
-  _dataFile() { return path.join(SESSION_DIR, "_appdata.json"); }
+  // ── Inicialização async (chamado no server.js) ──
+  async init() {
+    const connected = await db.testConnection();
+    if (!connected) {
+      console.error("[SessionManager] Não foi possível conectar ao Supabase. Verifique as credenciais no .env");
+      console.error("[SessionManager] Usando fallback local (dados não serão persistidos no banco)");
+      this._loadDataFromFile();
+      return;
+    }
 
-  _loadData() {
+    // Migrar dados do arquivo local se existirem
+    await this._migrateLocalData();
+
+    // Carregar dados do Supabase
+    this.contacts = await db.getContacts();
+    this.customNames = await db.getSessionNames();
+    console.log(`[SessionManager] Carregados ${this.contacts.length} contatos e ${this.customNames.size} nomes de sessão do Supabase`);
+  }
+
+  // ── Migração do _appdata.json para Supabase ──
+  async _migrateLocalData() {
+    const dataFile = path.join(SESSION_DIR, "_appdata.json");
     try {
-      const raw = fs.readFileSync(this._dataFile(), "utf-8");
+      if (!fs.existsSync(dataFile)) return;
+      const raw = fs.readFileSync(dataFile, "utf-8");
+      const data = JSON.parse(raw);
+
+      const contacts = (data.contacts || []).map(c => ({
+        ...c,
+        stage: c.stage || (c.contacted ? 'tentativa_de_contato' : 'novo'),
+        stageUpdatedAt: c.stageUpdatedAt || c.contactedAt || null,
+        notes: c.notes || '',
+      }));
+
+      const customNames = new Map();
+      if (data.customNames) {
+        for (const [k, v] of Object.entries(data.customNames)) customNames.set(k, v);
+      }
+
+      if (contacts.length > 0 || customNames.size > 0) {
+        await db.migrateFromFile(contacts, customNames);
+        // Renomear o arquivo para não migrar novamente
+        const backupPath = dataFile + ".migrated";
+        fs.renameSync(dataFile, backupPath);
+        console.log(`[SessionManager] Arquivo local migrado e renomeado para ${backupPath}`);
+      }
+    } catch (err) {
+      console.error("[SessionManager] Erro na migração:", err.message);
+    }
+  }
+
+  // Fallback se Supabase não estiver disponível
+  _loadDataFromFile() {
+    try {
+      const raw = fs.readFileSync(path.join(SESSION_DIR, "_appdata.json"), "utf-8");
       const data = JSON.parse(raw);
       if (data.customNames) {
         for (const [k, v] of Object.entries(data.customNames)) this.customNames.set(k, v);
@@ -58,97 +107,84 @@ class SessionManager {
     } catch (_) {}
   }
 
-  _saveData() {
-    const data = {
-      customNames: Object.fromEntries(this.customNames),
-      contacts: this.contacts,
-    };
-    fs.writeFileSync(this._dataFile(), JSON.stringify(data, null, 2), "utf-8");
-  }
-
   // ── Renomear instância ──
-  renameSession(sessionId, customName) {
+  async renameSession(sessionId, customName) {
     this.customNames.set(sessionId, customName);
-    this._saveData();
+    await db.saveSessionName(sessionId, customName);
     this._emitStatus(sessionId, this.sessions.get(sessionId)?.status || "disconnected");
     return { success: true };
   }
 
-  // ── Contatos manuais ──
-  addContact(nome, numero) {
+  // ── Contatos ──
+  async addContact(nome, numero) {
     const clean = String(numero).replace(/\D/g, "");
     if (!clean) return { success: false, message: "Número inválido" };
-    const exists = this.contacts.find((c) => c.numero === clean);
-    if (exists) return { success: false, message: "Contato já existe" };
-    const contact = { nome, numero: clean, contacted: false, contactedAt: null, contactedVia: null, stage: 'novo', stageUpdatedAt: Date.now(), notes: '' };
-    this.contacts.push(contact);
-    this._saveData();
-    return { success: true, contact };
-  }
 
-  removeContact(numero) {
-    const clean = String(numero).replace(/\D/g, "");
-    this.contacts = this.contacts.filter((c) => c.numero !== clean);
-    this._saveData();
-    return { success: true };
-  }
-
-  markContacted(numero, sessionId) {
-    const clean = String(numero).replace(/\D/g, "");
-    const contact = this.contacts.find((c) => c.numero === clean);
-    if (!contact) return { success: false, message: "Contato não encontrado" };
-    contact.contacted = true;
-    contact.contactedAt = Date.now();
-    contact.contactedVia = sessionId;
-    if (contact.stage === 'novo') {
-      contact.stage = 'tentativa_de_contato';
-      contact.stageUpdatedAt = Date.now();
+    const result = await db.addContact(nome, clean);
+    if (result.success) {
+      this.contacts = await db.getContacts(); // refresh cache
     }
-    this._saveData();
-    return { success: true, contact };
+    return result;
   }
 
-  getContacts() { return this.contacts; }
-
-  getPendingContacts() {
-    return this.contacts.filter((c) => !c.contacted);
+  async removeContact(numero) {
+    const clean = String(numero).replace(/\D/g, "");
+    const result = await db.removeContact(clean);
+    if (result.success) {
+      this.contacts = this.contacts.filter(c => c.numero !== clean);
+    }
+    return result;
   }
 
-  getContactedContacts() {
-    return this.contacts.filter((c) => c.contacted);
+  async markContacted(numero, sessionId) {
+    const clean = String(numero).replace(/\D/g, "");
+    const result = await db.markContacted(clean, sessionId);
+    if (result.success) {
+      // Atualizar cache local
+      const idx = this.contacts.findIndex(c => c.numero === clean);
+      if (idx >= 0) this.contacts[idx] = result.contact;
+    }
+    return result;
   }
 
-  updateContactStage(numero, stage) {
+  async getContacts() {
+    this.contacts = await db.getContacts();
+    return this.contacts;
+  }
+
+  async getPendingContacts() {
+    const all = await db.getContacts();
+    return all.filter(c => !c.contacted);
+  }
+
+  async getContactedContacts() {
+    const all = await db.getContacts();
+    return all.filter(c => c.contacted);
+  }
+
+  async updateContactStage(numero, stage) {
     if (!KANBAN_STAGES.includes(stage)) return { success: false, message: 'Estágio inválido' };
     const clean = String(numero).replace(/\D/g, '');
-    const contact = this.contacts.find(c => c.numero === clean);
-    if (!contact) return { success: false, message: 'Contato não encontrado' };
-    contact.stage = stage;
-    contact.stageUpdatedAt = Date.now();
-    this._saveData();
-    return { success: true, contact };
+    const result = await db.updateStage(clean, stage);
+    if (result.success) {
+      const idx = this.contacts.findIndex(c => c.numero === clean);
+      if (idx >= 0) this.contacts[idx] = result.contact;
+    }
+    return result;
   }
 
-  updateContactNotes(numero, notes) {
+  async updateContactNotes(numero, notes) {
     const clean = String(numero).replace(/\D/g, '');
-    const contact = this.contacts.find(c => c.numero === clean);
-    if (!contact) return { success: false, message: 'Contato não encontrado' };
-    contact.notes = notes || '';
-    this._saveData();
-    return { success: true, contact };
+    const result = await db.updateNotes(clean, notes);
+    if (result.success) {
+      const idx = this.contacts.findIndex(c => c.numero === clean);
+      if (idx >= 0) this.contacts[idx] = result.contact;
+    }
+    return result;
   }
 
-  getKanbanBoard() {
-    const board = {};
-    for (const s of KANBAN_STAGES) board[s] = [];
-    for (const c of this.contacts) {
-      const stage = c.stage || 'novo';
-      if (board[stage]) board[stage].push(c);
-    }
-    for (const key of KANBAN_STAGES) {
-      board[key].sort((a, b) => (b.stageUpdatedAt || 0) - (a.stageUpdatedAt || 0));
-    }
-    return board;
+  async getKanbanBoard() {
+    return await db.getKanbanBoard();
   }
 
   // ── Formatar telefone legível ──
@@ -284,12 +320,10 @@ class SessionManager {
       const reason = DisconnectReason;
 
       if (code === reason.loggedOut) {
-        // Limpar sessão se logout
         this._clearSession(sessionId);
         this._emitStatus(sessionId, "disconnected");
         console.log(`[${sessionId}] Logged out. Session cleared.`);
       } else {
-        // Reconexão com backoff exponencial
         const retries = (this.retryCount.get(sessionId) || 0) + 1;
         this.retryCount.set(sessionId, retries);
         const delay = Math.min(1000 * Math.pow(2, retries), 60000);
@@ -325,7 +359,7 @@ class SessionManager {
     this.retryCount.delete(sessionId);
     this.messageStore.delete(sessionId);
     this.customNames.delete(sessionId);
-    this._saveData();
+    await db.deleteSessionName(sessionId);
     const sessionPath = path.join(SESSION_DIR, sessionId);
     fs.rmSync(sessionPath, { recursive: true, force: true });
     this._emitStatus(sessionId, "disconnected");
@@ -396,11 +430,11 @@ class SessionManager {
       const buffer = fs.readFileSync(filePath);
       const mime = require("mime-types");
       const detectedMime = mime.lookup(filePath) || "audio/mpeg";
-      const isOgg = filePath.endsWith(".ogg") || filePath.endsWith(".opus");
+      const isVoice = filePath.endsWith(".ogg") || filePath.endsWith(".opus") || filePath.endsWith(".webm");
       const sent = await sess.sock.sendMessage(formattedJid, {
         audio: buffer,
-        mimetype: isOgg ? "audio/ogg; codecs=opus" : detectedMime,
-        ptt: isOgg,
+        mimetype: isVoice ? "audio/ogg; codecs=opus" : detectedMime,
+        ptt: isVoice,
       });
       const mediaUrl = `/uploads/${path.basename(filePath)}`;
       if (sent?.key?.id) this.sentMediaUrls.set(sent.key.id, mediaUrl);
@@ -431,7 +465,7 @@ class SessionManager {
     }
   }
 
-  // ── Mensagem Store ──
+  // ── Mensagem Store (cache + Supabase) ──
   async _storeMessage(sessionId, msg) {
     const chatJid = msg.key.remoteJid;
     if (!chatJid) return null;
@@ -447,13 +481,11 @@ class SessionManager {
 
     if (isMedia) {
       if (msg.key.fromMe) {
-        // Para mensagens enviadas, usar a URL do upload local
         if (this.sentMediaUrls.has(msg.key.id)) {
           formatted.mediaUrl = this.sentMediaUrls.get(msg.key.id);
           this.sentMediaUrls.delete(msg.key.id);
         }
       } else {
-        // Para mensagens recebidas, baixar a mídia
         try {
           const buffer = await downloadMediaMessage(msg, "buffer", {});
           if (buffer) {
@@ -470,8 +502,15 @@ class SessionManager {
       }
     }
 
+    // Cache em memória
     arr.push(formatted);
-    if (arr.length > 200) arr.shift();
+    if (arr.length > 500) arr.shift();
+
+    // Persistir no Supabase (fire-and-forget, não bloqueia)
+    db.saveMessage(formatted).catch(err => {
+      console.error(`[${sessionId}] DB save error:`, err.message);
+    });
+
     return formatted;
   }
 
@@ -526,7 +565,13 @@ class SessionManager {
     };
   }
 
-  getChats() {
+  // ── Chats (Supabase como fonte principal) ──
+  async getChats() {
+    // Tentar buscar do Supabase
+    const dbChats = await db.getChats();
+    if (dbChats.length > 0) return dbChats;
+
+    // Fallback: cache em memória
     const chats = new Map();
     for (const [sessionId, chatMap] of this.messageStore) {
       for (const [jid, messages] of chatMap) {
@@ -549,7 +594,12 @@ class SessionManager {
     return Array.from(chats.values()).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
   }
 
-  getChatMessages(jid) {
+  async getChatMessages(jid) {
+    // Buscar do Supabase (todas as mensagens persistidas)
+    const dbMessages = await db.getMessages(jid);
+    if (dbMessages.length > 0) return dbMessages;
+
+    // Fallback: cache em memória
     const all = [];
     for (const [sessionId, chatMap] of this.messageStore) {
       const msgs = chatMap.get(jid) || [];

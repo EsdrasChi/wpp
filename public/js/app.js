@@ -1098,6 +1098,196 @@ function seekAudio(rangeEl) {
   }
 }
 
+// ─── Audio Recording ────────────────────
+let mediaRecorder = null;
+let audioChunks = [];
+let recordingStartTime = null;
+let recordingTimerInterval = null;
+let audioContext = null;
+let analyserNode = null;
+let waveformAnimId = null;
+let recordingStream = null;
+let recordingCancelled = false;
+
+async function toggleRecording() {
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+async function startRecording() {
+  if (!currentChatJid) {
+    alert("Abra um chat primeiro");
+    return;
+  }
+  const sessionId = document.getElementById("send-session-select").value;
+  if (!sessionId || !sessions[sessionId] || sessions[sessionId].status !== "open") {
+    alert("Selecione uma instância conectada");
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordingStream = stream;
+    recordingCancelled = false;
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      cleanupRecordingUI();
+
+      if (recordingCancelled) {
+        audioChunks = [];
+        return;
+      }
+
+      const blob = new Blob(audioChunks, { type: "audio/webm" });
+      if (blob.size < 1000) return;
+
+      const file = new File([blob], `audio-${Date.now()}.webm`, { type: "audio/webm" });
+      await handleFileSend("audio", file);
+    };
+
+    // Web Audio API para waveform
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    analyserNode = audioContext.createAnalyser();
+    analyserNode.fftSize = 256;
+    source.connect(analyserNode);
+
+    mediaRecorder.start(100);
+    recordingStartTime = Date.now();
+
+    // UI: mostrar barra de gravação, esconder input normal
+    document.getElementById("input-normal").classList.add("hidden");
+    document.getElementById("input-recording").style.display = "flex";
+    document.getElementById("input-recording").classList.remove("hidden");
+    document.getElementById("btn-send").classList.add("hidden");
+
+    const btn = document.getElementById("btn-record");
+    btn.classList.remove("text-gray-400", "hover:text-purple-400", "hover:bg-purple-500/10", "border-white/5", "hover:border-purple-500/20");
+    btn.classList.add("text-red-400", "bg-red-500/15", "border-red-500/30");
+    document.getElementById("mic-icon").classList.add("hidden");
+    document.getElementById("stop-icon").classList.remove("hidden");
+
+    // Timer
+    const timer = document.getElementById("recording-timer");
+    timer.textContent = "0:00";
+    recordingTimerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+      const m = Math.floor(elapsed / 60);
+      const s = (elapsed % 60).toString().padStart(2, "0");
+      timer.textContent = `${m}:${s}`;
+    }, 500);
+
+    // Iniciar waveform
+    drawWaveform();
+
+  } catch (err) {
+    alert("Não foi possível acessar o microfone. Permita o acesso nas configurações do navegador.");
+    console.error("Mic error:", err);
+  }
+}
+
+function stopRecording() {
+  recordingCancelled = false;
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+  }
+}
+
+function cancelRecording() {
+  recordingCancelled = true;
+  if (mediaRecorder && mediaRecorder.state === "recording") {
+    mediaRecorder.stop();
+  } else {
+    if (recordingStream) recordingStream.getTracks().forEach(t => t.stop());
+    cleanupRecordingUI();
+  }
+}
+
+function cleanupRecordingUI() {
+  clearInterval(recordingTimerInterval);
+  if (waveformAnimId) {
+    cancelAnimationFrame(waveformAnimId);
+    waveformAnimId = null;
+  }
+  if (audioContext) {
+    audioContext.close().catch(() => {});
+    audioContext = null;
+    analyserNode = null;
+  }
+  recordingStream = null;
+
+  // UI: voltar ao normal
+  document.getElementById("input-normal").classList.remove("hidden");
+  document.getElementById("input-recording").style.display = "";
+  document.getElementById("input-recording").classList.add("hidden");
+  document.getElementById("btn-send").classList.remove("hidden");
+
+  const btn = document.getElementById("btn-record");
+  btn.classList.add("text-gray-400", "hover:text-purple-400", "hover:bg-purple-500/10", "border-white/5", "hover:border-purple-500/20");
+  btn.classList.remove("text-red-400", "bg-red-500/15", "border-red-500/30");
+  document.getElementById("mic-icon").classList.remove("hidden");
+  document.getElementById("stop-icon").classList.add("hidden");
+}
+
+function drawWaveform() {
+  if (!analyserNode) return;
+
+  const canvas = document.getElementById("waveform-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+
+  // Ajustar resolução do canvas
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+  const bufferLength = analyserNode.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+
+  function draw() {
+    if (!analyserNode) return;
+    waveformAnimId = requestAnimationFrame(draw);
+
+    analyserNode.getByteFrequencyData(dataArray);
+
+    const w = rect.width;
+    const h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const barCount = 40;
+    const gap = 2;
+    const barWidth = (w - gap * (barCount - 1)) / barCount;
+    const step = Math.floor(bufferLength / barCount);
+
+    for (let i = 0; i < barCount; i++) {
+      let sum = 0;
+      for (let j = 0; j < step; j++) {
+        sum += dataArray[i * step + j];
+      }
+      const avg = sum / step;
+      const barHeight = Math.max(2, (avg / 255) * h * 0.9);
+      const x = i * (barWidth + gap);
+      const y = (h - barHeight) / 2;
+
+      ctx.fillStyle = `rgba(239, 68, 68, ${0.4 + (avg / 255) * 0.6})`;
+      ctx.fillRect(x, y, barWidth, barHeight);
+    }
+  }
+
+  draw();
+}
+
 // ─── Media Modal ────────────────────────
 function openMedia(url, type) {
   const modal = document.getElementById("media-modal");

@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -7,7 +9,6 @@ const multer = require("multer");
 const SessionManager = require("./src/session-manager");
 const setupSocketHandler = require("./src/socket-handler");
 const apiRoutes = require("./src/routes/api");
-
 const PORT = process.env.PORT || 3000;
 const app = express();
 const server = http.createServer(app);
@@ -48,13 +49,16 @@ app.get("*", (req, res) => {
 // ── Socket.io ──
 setupSocketHandler(io, sessionManager);
 
-// ── Start ──
-server.listen(PORT, () => {
-  console.log(`\n  ╔═══════════════════════════════════════╗`);
-  console.log(`  ║   WPP OUTBOUND running on port ${PORT}   ║`);
-  console.log(`  ║   http://localhost:${PORT}              ║`);
-  console.log(`  ╚═══════════════════════════════════════╝\n`);
-});
+// ── Start (async init para Supabase) ──
+(async () => {
+  await sessionManager.init();
+  server.listen(PORT, () => {
+    console.log(`\n  ╔═══════════════════════════════════════╗`);
+    console.log(`  ║   WPP OUTBOUND running on port ${PORT}   ║`);
+    console.log(`  ║   http://localhost:${PORT}              ║`);
+    console.log(`  ╚═══════════════════════════════════════╝\n`);
+  });
+})();
 
 process.on("uncaughtException", (err) => {
   console.error("[FATAL] Uncaught:", err.message);

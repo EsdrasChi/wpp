@@ -1,12 +1,13 @@
 module.exports = function setupSocketHandler(io, sessionManager) {
-  io.on("connection", (socket) => {
+  io.on("connection", async (socket) => {
     console.log(`[WS] Client connected: ${socket.id}`);
 
     // Enviar status inicial
     socket.emit("sessions:all", sessionManager.getStatuses());
 
     // Enviar chats atuais
-    socket.emit("chats:list", sessionManager.getChats());
+    const chats = await sessionManager.getChats();
+    socket.emit("chats:list", chats);
 
     socket.on("session:start", async (data) => {
       const result = await sessionManager.startSession(data.sessionId);
@@ -24,10 +25,9 @@ module.exports = function setupSocketHandler(io, sessionManager) {
       io.emit("sessions:all", sessionManager.getStatuses());
     });
 
-    socket.on("session:rename", (data) => {
-      const result = sessionManager.renameSession(data.sessionId, data.customName);
+    socket.on("session:rename", async (data) => {
+      const result = await sessionManager.renameSession(data.sessionId, data.customName);
       socket.emit("session:renamed", { sessionId: data.sessionId, ...result });
-      // Atualizar todos os clientes
       io.emit("sessions:all", sessionManager.getStatuses());
     });
 
@@ -37,21 +37,22 @@ module.exports = function setupSocketHandler(io, sessionManager) {
       socket.emit("message:sent", { sessionId, jid, ...result });
     });
 
-    socket.on("chat:history", (data) => {
-      const messages = sessionManager.getChatMessages(data.jid);
+    socket.on("chat:history", async (data) => {
+      const messages = await sessionManager.getChatMessages(data.jid);
       socket.emit("chat:messages", { jid: data.jid, messages });
     });
 
-    socket.on("contact:update-stage", (data) => {
+    socket.on("contact:update-stage", async (data) => {
       const { numero, stage } = data;
-      const result = sessionManager.updateContactStage(numero, stage);
+      const result = await sessionManager.updateContactStage(numero, stage);
       if (result.success) {
         io.emit("kanban:stage-changed", { numero, stage, contact: result.contact });
       }
     });
 
-    socket.on("chats:refresh", () => {
-      socket.emit("chats:list", sessionManager.getChats());
+    socket.on("chats:refresh", async () => {
+      const refreshedChats = await sessionManager.getChats();
+      socket.emit("chats:list", refreshedChats);
     });
 
     socket.on("disconnect", () => {
