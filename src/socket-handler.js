@@ -42,6 +42,14 @@ module.exports = function setupSocketHandler(io, sessionManager) {
       socket.emit("chat:messages", { jid: data.jid, messages });
     });
 
+    socket.on("contact:update-stage", (data) => {
+      const { numero, stage } = data;
+      const result = sessionManager.updateContactStage(numero, stage);
+      if (result.success) {
+        io.emit("kanban:stage-changed", { numero, stage, contact: result.contact });
+      }
+    });
+
     socket.on("chats:refresh", () => {
       socket.emit("chats:list", sessionManager.getChats());
     });

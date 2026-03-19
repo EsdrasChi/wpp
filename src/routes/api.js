@@ -129,6 +129,23 @@ module.exports = function apiRoutes(sessionManager, upload) {
     res.json(result);
   });
 
+  // Kanban
+  router.get("/kanban", (req, res) => {
+    res.json(sessionManager.getKanbanBoard());
+  });
+
+  router.post("/contacts/:numero/stage", (req, res) => {
+    const { stage } = req.body;
+    const result = sessionManager.updateContactStage(req.params.numero, stage);
+    res.json(result);
+  });
+
+  router.post("/contacts/:numero/notes", (req, res) => {
+    const { notes } = req.body;
+    const result = sessionManager.updateContactNotes(req.params.numero, notes);
+    res.json(result);
+  });
+
   // Chats
   router.get("/chats", (req, res) => {
     res.json(sessionManager.getChats());

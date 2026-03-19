@@ -11,6 +11,18 @@ let sessions = {};
 let qrModalSession = null;
 let contactTab = "pending"; // "pending" ou "contacted"
 let pickerContact = null; // contato selecionado no modal
+let kanbanData = {};
+let selectedKanbanCard = null;
+
+const KANBAN_STAGES = [
+  { key: 'novo', label: 'Novo', color: '#94a3b8', badge: 'stage-novo' },
+  { key: 'tentativa_de_contato', label: 'Tentativa de contato', color: '#fbbf24', badge: 'stage-tentativa' },
+  { key: 'conectado', label: 'Conectado', color: '#22c55e', badge: 'stage-conectado' },
+  { key: 'consultoria_agendada', label: 'Consultoria agendada', color: '#3b82f6', badge: 'stage-agendada' },
+  { key: 'consultoria_realizada', label: 'Consultoria realizada', color: '#8b5cf6', badge: 'stage-realizada' },
+  { key: 'no_show', label: 'No show', color: '#ef4444', badge: 'stage-noshow' },
+  { key: 'perdido', label: 'Perdido', color: '#6b7280', badge: 'stage-perdido' },
+];
 
 const INSTANCE_COLORS = {
   "session-1": { bg: "inst-badge-1", label: "S1" },
@@ -30,6 +42,7 @@ function switchView(view) {
 
   if (view === "instances") renderInstances();
   if (view === "contacts") renderContactsView();
+  if (view === "kanban") loadKanbanData();
 }
 
 // ─── Socket Events ───────────────────────
@@ -98,6 +111,15 @@ socket.on("chat:messages", (data) => {
 socket.on("message:sent", (data) => {
   if (data.success) {
     document.getElementById("chat-input").value = "";
+  }
+});
+
+socket.on("kanban:stage-changed", (data) => {
+  if (currentView === "kanban") loadKanbanData();
+  // Atualizar leads local
+  const contact = leads.find(l => l.numero === data.numero);
+  if (contact) {
+    contact.stage = data.stage;
   }
 });
 
@@ -306,6 +328,13 @@ function openChat(jid) {
   const num = jid.split("@")[0];
   const initial = name.charAt(0).toUpperCase();
 
+  const contact = leads.find(l => l.numero === num);
+  const stageHtml = contact ? `
+    <select onchange="updateChatStage('${num}', this.value)"
+      class="bg-surface-800 border border-white/5 rounded-lg px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-accent-500/50 ml-auto">
+      ${KANBAN_STAGES.map(s => `<option value="${s.key}" ${(contact.stage || 'novo') === s.key ? 'selected' : ''}>${s.label}</option>`).join('')}
+    </select>` : '';
+
   document.getElementById("chat-header").innerHTML = `
     <div class="w-8 h-8 rounded-full bg-surface-800 flex items-center justify-center text-sm font-medium text-gray-400">
       ${initial}
@@ -314,6 +343,7 @@ function openChat(jid) {
       <p class="text-sm font-medium text-white">${escapeHtml(name)}</p>
       <p class="text-[10px] text-gray-500 font-mono">${num}</p>
     </div>
+    ${stageHtml}
   `;
 
   document.getElementById("chat-input-area").classList.remove("hidden");
@@ -782,6 +812,10 @@ async function startConversation(numero, sessionId) {
       contact.contacted = true;
       contact.contactedAt = Date.now();
       contact.contactedVia = sessionId;
+      if (contact.stage === 'novo' || !contact.stage) {
+        contact.stage = 'tentativa_de_contato';
+        contact.stageUpdatedAt = Date.now();
+      }
     }
     updatePendingBadge();
     renderContactsView();
@@ -1102,6 +1136,162 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text || "";
   return div.innerHTML;
+}
+
+// ─── Kanban Board ───────────────────────
+async function loadKanbanData() {
+  try {
+    const res = await fetch("/api/kanban");
+    kanbanData = await res.json();
+    renderKanban();
+  } catch (err) {
+    console.error("Failed to load Kanban:", err);
+  }
+}
+
+function renderKanban() {
+  const board = document.getElementById("kanban-board");
+  if (!board) return;
+
+  board.innerHTML = KANBAN_STAGES.map(stage => {
+    const contacts = kanbanData[stage.key] || [];
+    return `
+      <div class="kanban-column">
+        <div class="kanban-column-header">
+          <div class="flex items-center gap-2">
+            <div class="w-3 h-3 rounded-full" style="background: ${stage.color};"></div>
+            <h3 class="text-sm font-semibold text-white">${stage.label}</h3>
+          </div>
+          <span class="text-xs font-bold text-gray-500">${contacts.length}</span>
+        </div>
+        <div class="kanban-column-body">
+          ${contacts.map(c => renderKanbanCard(c, stage)).join('')}
+          ${contacts.length === 0 ? '<p class="text-xs text-gray-600 text-center py-8">Nenhum lead</p>' : ''}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderKanbanCard(c, stage) {
+  const initials = c.nome ? c.nome.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() : c.numero.slice(-2);
+  const viaColors = c.contactedVia ? INSTANCE_COLORS[c.contactedVia] : null;
+  const time = c.stageUpdatedAt ? formatTime(c.stageUpdatedAt) : '';
+  const safeNumero = c.numero.replace(/'/g, "\\'");
+
+  return `
+    <div class="kanban-card" onclick="openKanbanCardModal('${safeNumero}')">
+      <div class="flex items-start gap-3 mb-1">
+        <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0"
+             style="background: ${stage.color}20; color: ${stage.color};">
+          ${initials}
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-white truncate">${escapeHtml(c.nome || "Sem nome")}</p>
+          <p class="text-[10px] text-gray-500 font-mono">${escapeHtml(c.numero)}</p>
+        </div>
+      </div>
+      ${c.notes ? `<p class="text-[11px] text-gray-400 mt-2 line-clamp-2 leading-relaxed">${escapeHtml(c.notes)}</p>` : ''}
+      <div class="flex items-center justify-between mt-2 pt-2 border-t border-white/5">
+        ${viaColors ? `<span class="inst-badge ${viaColors.bg}">${viaColors.label}</span>` : '<span></span>'}
+        <span class="text-[10px] text-gray-600">${time}</span>
+      </div>
+    </div>`;
+}
+
+function openKanbanCardModal(numero) {
+  const clean = numero.replace(/\D/g, "");
+  const allContacts = Object.values(kanbanData).flat();
+  const contact = allContacts.find(c => c.numero === clean);
+  if (!contact) return;
+
+  selectedKanbanCard = contact;
+
+  document.getElementById("kanban-card-name").textContent = contact.nome || "Sem nome";
+  document.getElementById("kanban-card-number").textContent = contact.numero;
+  document.getElementById("kanban-card-stage").value = contact.stage || 'novo';
+  document.getElementById("kanban-card-notes").value = contact.notes || '';
+  document.getElementById("kanban-card-modal").classList.remove("hidden");
+}
+
+function closeKanbanCardModal() {
+  document.getElementById("kanban-card-modal").classList.add("hidden");
+  selectedKanbanCard = null;
+}
+
+async function saveKanbanCard() {
+  if (!selectedKanbanCard) return;
+
+  const newStage = document.getElementById("kanban-card-stage").value;
+  const newNotes = document.getElementById("kanban-card-notes").value.trim();
+
+  try {
+    if (newStage !== selectedKanbanCard.stage) {
+      await fetch(`/api/contacts/${selectedKanbanCard.numero}/stage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage: newStage }),
+      });
+    }
+    if (newNotes !== (selectedKanbanCard.notes || '')) {
+      await fetch(`/api/contacts/${selectedKanbanCard.numero}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: newNotes }),
+      });
+    }
+    // Atualizar local
+    const local = leads.find(l => l.numero === selectedKanbanCard.numero);
+    if (local) {
+      local.stage = newStage;
+      local.notes = newNotes;
+      local.stageUpdatedAt = Date.now();
+    }
+    closeKanbanCardModal();
+    loadKanbanData();
+  } catch (err) {
+    alert("Erro ao salvar: " + err.message);
+  }
+}
+
+function openChatFromKanban() {
+  if (!selectedKanbanCard) return;
+
+  const clean = selectedKanbanCard.numero.replace(/\D/g, "");
+  const jid = clean + "@s.whatsapp.net";
+
+  if (selectedKanbanCard.contactedVia) {
+    pendingSessionForChat = selectedKanbanCard.contactedVia;
+  }
+
+  closeKanbanCardModal();
+  currentChatJid = jid;
+  switchView("inbox");
+  openChat(jid);
+
+  if (pendingSessionForChat) {
+    setTimeout(() => {
+      const sendSelect = document.getElementById("send-session-select");
+      if (sendSelect) sendSelect.value = pendingSessionForChat;
+      pendingSessionForChat = null;
+    }, 200);
+  }
+}
+
+async function updateChatStage(numero, newStage) {
+  try {
+    await fetch(`/api/contacts/${numero}/stage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stage: newStage }),
+    });
+    const contact = leads.find(l => l.numero === numero);
+    if (contact) {
+      contact.stage = newStage;
+      contact.stageUpdatedAt = Date.now();
+    }
+  } catch (err) {
+    console.error("Failed to update stage:", err);
+  }
 }
 
 // ─── Init ───────────────────────────────

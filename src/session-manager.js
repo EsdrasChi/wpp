@@ -13,6 +13,7 @@ const QRCode = require("qrcode");
 
 const SESSION_DIR = path.resolve(process.env.SESSION_DIR || "./sessions");
 const MAX_INSTANCES = parseInt(process.env.MAX_INSTANCES || "5", 10);
+const KANBAN_STAGES = ['novo','tentativa_de_contato','conectado','consultoria_agendada','consultoria_realizada','no_show','perdido'];
 
 const BROWSER_PROFILES = [
   ["Chrome", "MacOS", "122.0.6261.94"],
@@ -46,7 +47,14 @@ class SessionManager {
       if (data.customNames) {
         for (const [k, v] of Object.entries(data.customNames)) this.customNames.set(k, v);
       }
-      if (data.contacts) this.contacts = data.contacts;
+      if (data.contacts) {
+        this.contacts = data.contacts.map(c => ({
+          ...c,
+          stage: c.stage || (c.contacted ? 'tentativa_de_contato' : 'novo'),
+          stageUpdatedAt: c.stageUpdatedAt || c.contactedAt || null,
+          notes: c.notes || '',
+        }));
+      }
     } catch (_) {}
   }
 
@@ -72,9 +80,10 @@ class SessionManager {
     if (!clean) return { success: false, message: "Número inválido" };
     const exists = this.contacts.find((c) => c.numero === clean);
     if (exists) return { success: false, message: "Contato já existe" };
-    this.contacts.push({ nome, numero: clean, contacted: false, contactedAt: null, contactedVia: null });
+    const contact = { nome, numero: clean, contacted: false, contactedAt: null, contactedVia: null, stage: 'novo', stageUpdatedAt: Date.now(), notes: '' };
+    this.contacts.push(contact);
     this._saveData();
-    return { success: true, contact: { nome, numero: clean, contacted: false, contactedAt: null, contactedVia: null } };
+    return { success: true, contact };
   }
 
   removeContact(numero) {
@@ -91,6 +100,10 @@ class SessionManager {
     contact.contacted = true;
     contact.contactedAt = Date.now();
     contact.contactedVia = sessionId;
+    if (contact.stage === 'novo') {
+      contact.stage = 'tentativa_de_contato';
+      contact.stageUpdatedAt = Date.now();
+    }
     this._saveData();
     return { success: true, contact };
   }
@@ -103,6 +116,39 @@ class SessionManager {
 
   getContactedContacts() {
     return this.contacts.filter((c) => c.contacted);
+  }
+
+  updateContactStage(numero, stage) {
+    if (!KANBAN_STAGES.includes(stage)) return { success: false, message: 'Estágio inválido' };
+    const clean = String(numero).replace(/\D/g, '');
+    const contact = this.contacts.find(c => c.numero === clean);
+    if (!contact) return { success: false, message: 'Contato não encontrado' };
+    contact.stage = stage;
+    contact.stageUpdatedAt = Date.now();
+    this._saveData();
+    return { success: true, contact };
+  }
+
+  updateContactNotes(numero, notes) {
+    const clean = String(numero).replace(/\D/g, '');
+    const contact = this.contacts.find(c => c.numero === clean);
+    if (!contact) return { success: false, message: 'Contato não encontrado' };
+    contact.notes = notes || '';
+    this._saveData();
+    return { success: true, contact };
+  }
+
+  getKanbanBoard() {
+    const board = {};
+    for (const s of KANBAN_STAGES) board[s] = [];
+    for (const c of this.contacts) {
+      const stage = c.stage || 'novo';
+      if (board[stage]) board[stage].push(c);
+    }
+    for (const key of KANBAN_STAGES) {
+      board[key].sort((a, b) => (b.stageUpdatedAt || 0) - (a.stageUpdatedAt || 0));
+    }
+    return board;
   }
 
   // ── Formatar telefone legível ──
