@@ -1,0 +1,86 @@
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* ── Transitions ── */
+.nav-btn.active { background: rgba(255,255,255,0.06); color: #fff; }
+
+/* ── Chat items ── */
+.chat-item { transition: background 0.15s; }
+.chat-item:hover { background: rgba(255,255,255,0.04); }
+.chat-item.active { background: rgba(99,102,241,0.12); border-right: 2px solid #6366f1; }
+
+/* ── Message bubbles ── */
+.msg-bubble {
+  max-width: 70%;
+  word-break: break-word;
+}
+.msg-incoming {
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px 16px 16px 16px;
+}
+.msg-outgoing {
+  background: rgba(99,102,241,0.2);
+  border-radius: 16px 4px 16px 16px;
+  margin-left: auto;
+}
+
+/* ── Instance badge ── */
+.inst-badge { font-size: 9px; padding: 1px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px; }
+.inst-badge-1 { background: rgba(34,211,238,0.15); color: #22d3ee; }
+.inst-badge-2 { background: rgba(167,139,250,0.15); color: #a78bfa; }
+.inst-badge-3 { background: rgba(52,211,153,0.15); color: #34d399; }
+.inst-badge-4 { background: rgba(251,146,60,0.15); color: #fb923c; }
+.inst-badge-5 { background: rgba(244,114,182,0.15); color: #f472b6; }
+
+/* ── Status dot ── */
+.status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.status-open { background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,0.5); }
+.status-connecting, .status-qr, .status-reconnecting { background: #fbbf24; animation: pulse-dot 1.5s infinite; }
+.status-disconnected, .status-error { background: #6b7280; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Audio player ── */
+.audio-player {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 20px; padding: 6px 12px;
+}
+.audio-player button {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: #6366f1; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.audio-player input[type=range] {
+  flex: 1; height: 3px; accent-color: #6366f1;
+}
+
+/* ── Contact card ── */
+.contact-card {
+  transition: border-color 0.2s, transform 0.15s;
+  cursor: pointer;
+}
+.contact-card:hover {
+  border-color: rgba(99,102,241,0.3);
+  transform: translateY(-1px);
+}
+
+/* ── Instance picker button ── */
+.picker-btn {
+  transition: all 0.15s;
+}
+.picker-btn:hover {
+  transform: scale(1.01);
+}
+
+/* ── Contact tab active ── */
+.contact-tab.active-tab {
+  background: rgba(99,102,241,0.15);
+  color: #818cf8;
+}

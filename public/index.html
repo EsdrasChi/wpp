@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WPP Outbound</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          fontFamily: { sans: ["Inter", "system-ui", "sans-serif"] },
+          colors: {
+            surface: { 50: "#f8fafc", 100: "#f1f5f9", 800: "#1e1e2e", 900: "#11111b", 950: "#0a0a14" },
+            accent: { 400: "#818cf8", 500: "#6366f1", 600: "#4f46e5" },
+            inst: {
+              1: "#22d3ee", 2: "#a78bfa", 3: "#34d399",
+              4: "#fb923c", 5: "#f472b6",
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="bg-surface-950 text-gray-200 font-sans h-screen overflow-hidden">
+
+  <!-- ─── APP SHELL ─── -->
+  <div id="app" class="flex h-full">
+
+    <!-- ══ SIDEBAR ══ -->
+    <aside id="sidebar" class="w-72 bg-surface-900 border-r border-white/5 flex flex-col shrink-0">
+
+      <!-- Logo -->
+      <div class="px-5 py-4 border-b border-white/5 flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-accent-500 flex items-center justify-center text-white font-bold text-sm">W</div>
+        <div>
+          <h1 class="text-sm font-semibold text-white tracking-tight">WPP Outbound</h1>
+          <p class="text-[10px] text-gray-500 uppercase tracking-widest">5-Instance Hub</p>
+        </div>
+      </div>
+
+      <!-- Nav -->
+      <nav class="flex-1 overflow-y-auto py-3 px-3 space-y-1">
+        <button onclick="switchView('inbox')" data-nav="inbox"
+          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-2.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+          Inbox
+        </button>
+        <button onclick="switchView('instances')" data-nav="instances"
+          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          Instâncias
+        </button>
+        <button onclick="switchView('contacts')" data-nav="contacts"
+          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          Contatos
+          <span id="pending-count-badge" class="ml-auto bg-accent-500/20 text-accent-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
+        </button>
+        <button onclick="switchView('crm')" data-nav="crm"
+          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          CRM & Leads
+        </button>
+      </nav>
+
+      <!-- Instance status mini -->
+      <div class="px-3 pb-4">
+        <div class="text-[10px] text-gray-500 uppercase tracking-widest px-3 mb-2">Sessões</div>
+        <div id="sidebar-instances" class="space-y-1"></div>
+      </div>
+    </aside>
+
+    <!-- ══ MAIN CONTENT ══ -->
+    <main class="flex-1 flex overflow-hidden">
+
+      <!-- ── VIEW: INBOX ── -->
+      <div id="view-inbox" class="view flex w-full">
+        <!-- Chat list -->
+        <div class="w-80 bg-surface-900/50 border-r border-white/5 flex flex-col">
+          <div class="p-3 border-b border-white/5">
+            <div class="relative">
+              <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <input id="chat-search" type="text" placeholder="Buscar conversas..."
+                class="w-full bg-surface-800 border border-white/5 rounded-lg pl-10 pr-4 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50" />
+            </div>
+          </div>
+          <div id="chat-list" class="flex-1 overflow-y-auto"></div>
+        </div>
+
+        <!-- Chat thread -->
+        <div class="flex-1 flex flex-col">
+          <div id="chat-header" class="h-14 px-5 border-b border-white/5 flex items-center gap-3">
+            <p class="text-sm text-gray-500">Selecione uma conversa</p>
+          </div>
+          <div id="chat-messages" class="flex-1 overflow-y-auto p-5 space-y-3"></div>
+          <div id="chat-input-area" class="p-4 border-t border-white/5 hidden">
+            <div class="flex gap-2">
+              <select id="send-session-select" class="bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-accent-500/50">
+              </select>
+              <input id="chat-input" type="text" placeholder="Digite sua mensagem..."
+                class="flex-1 bg-surface-800 border border-white/5 rounded-lg px-4 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50" />
+              <button id="btn-send" onclick="sendMessage()"
+                class="bg-accent-500 hover:bg-accent-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
+                Enviar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── VIEW: INSTANCES ── -->
+      <div id="view-instances" class="view hidden w-full overflow-y-auto p-6">
+        <h2 class="text-xl font-semibold text-white mb-6">Gerenciamento de Instâncias</h2>
+        <div id="instances-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      </div>
+
+      <!-- ── VIEW: CONTATOS ── -->
+      <div id="view-contacts" class="view hidden w-full overflow-y-auto p-6">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-xl font-semibold text-white">Contatos</h2>
+            <p class="text-xs text-gray-500 mt-1">Gerencie seus contatos e inicie conversas</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <input id="contacts-search" type="text" placeholder="Buscar contato..."
+              oninput="renderContactsView()"
+              class="bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50 w-56" />
+          </div>
+        </div>
+
+        <!-- Tabs: Pendentes / Contatados -->
+        <div class="flex gap-1 mb-5 bg-surface-900 rounded-lg p-1 w-fit">
+          <button id="tab-pending" onclick="setContactTab('pending')"
+            class="contact-tab px-4 py-2 rounded-md text-xs font-medium transition-colors bg-accent-500/15 text-accent-400">
+            Aguardando contato
+            <span id="tab-pending-count" class="ml-1 bg-accent-500/30 text-accent-300 px-1.5 py-0.5 rounded-full text-[10px]">0</span>
+          </button>
+          <button id="tab-contacted" onclick="setContactTab('contacted')"
+            class="contact-tab px-4 py-2 rounded-md text-xs font-medium transition-colors text-gray-500 hover:text-gray-300">
+            Ja contatados
+            <span id="tab-contacted-count" class="ml-1 text-[10px]">0</span>
+          </button>
+        </div>
+
+        <!-- Lista de contatos -->
+        <div id="contacts-list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+        <div id="contacts-empty" class="hidden py-16 text-center">
+          <svg class="w-12 h-12 mx-auto text-gray-700 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          <p class="text-gray-600 text-sm" id="contacts-empty-text">Nenhum contato pendente</p>
+          <p class="text-gray-700 text-xs mt-1">Adicione contatos na aba CRM & Leads</p>
+        </div>
+      </div>
+
+      <!-- ── VIEW: CRM ── -->
+      <div id="view-crm" class="view hidden w-full overflow-y-auto p-6">
+        <h2 class="text-xl font-semibold text-white mb-6">CRM & Outbound</h2>
+
+        <!-- Adicionar Contato Manual -->
+        <div class="bg-surface-900 border border-white/5 rounded-xl p-6 mb-6">
+          <h3 class="text-sm font-medium text-gray-300 mb-4">Adicionar Contato</h3>
+          <div class="flex gap-3 items-end flex-wrap">
+            <div class="flex-1 min-w-[180px]">
+              <label class="text-xs text-gray-500 mb-1 block">Nome</label>
+              <input id="contact-name" type="text" placeholder="Ex: João Silva"
+                class="w-full bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50" />
+            </div>
+            <div class="flex-1 min-w-[180px]">
+              <label class="text-xs text-gray-500 mb-1 block">Número (com DDD)</label>
+              <input id="contact-number" type="text" placeholder="Ex: 5511999998888"
+                class="w-full bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50" />
+            </div>
+            <button onclick="addManualContact()"
+              class="bg-accent-500 hover:bg-accent-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
+              + Adicionar
+            </button>
+            <span id="contact-status" class="text-xs text-gray-500"></span>
+          </div>
+        </div>
+
+        <!-- Upload CSV -->
+        <div class="bg-surface-900 border border-white/5 rounded-xl p-6 mb-6">
+          <h3 class="text-sm font-medium text-gray-300 mb-4">Importar Leads (CSV)</h3>
+          <p class="text-xs text-gray-500 mb-3">Formato esperado: colunas <code class="text-accent-400">nome</code> e <code class="text-accent-400">numero</code></p>
+          <div class="flex gap-3 items-center">
+            <label class="flex items-center gap-2 bg-surface-800 hover:bg-surface-800/80 border border-white/10 rounded-lg px-4 py-2 text-sm cursor-pointer transition-colors">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+              <span class="text-gray-400">Escolher arquivo</span>
+              <input id="csv-file" type="file" accept=".csv" class="hidden" onchange="uploadCSV()" />
+            </label>
+            <span id="csv-status" class="text-xs text-gray-500"></span>
+          </div>
+        </div>
+
+        <!-- Leads Table -->
+        <div class="bg-surface-900 border border-white/5 rounded-xl overflow-hidden">
+          <div class="p-4 border-b border-white/5 flex items-center justify-between">
+            <h3 class="text-sm font-medium text-gray-300">Leads</h3>
+            <input id="lead-search" type="text" placeholder="Buscar lead..."
+              class="bg-surface-800 border border-white/5 rounded-lg px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50 w-56" oninput="filterLeads()" />
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs text-gray-500 uppercase tracking-wider">
+                  <th class="px-4 py-3 font-medium">Nome</th>
+                  <th class="px-4 py-3 font-medium">Número</th>
+                  <th class="px-4 py-3 font-medium text-right">Ação</th>
+                </tr>
+              </thead>
+              <tbody id="leads-tbody" class="divide-y divide-white/5"></tbody>
+            </table>
+          </div>
+          <div id="leads-empty" class="p-10 text-center text-gray-600 text-sm">
+            Nenhum lead importado. Faça upload de um CSV acima.
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ══ QR CODE MODAL ══ -->
+  <div id="qr-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+    <div class="bg-surface-900 border border-white/10 rounded-2xl p-8 text-center max-w-sm w-full mx-4">
+      <h3 id="qr-modal-title" class="text-lg font-semibold text-white mb-4">Escanear QR Code</h3>
+      <div id="qr-container" class="bg-white rounded-xl p-4 inline-block mb-4">
+        <img id="qr-image" src="" alt="QR Code" class="w-64 h-64" />
+      </div>
+      <p class="text-xs text-gray-500 mb-4">Abra o WhatsApp e escaneie o código</p>
+      <button onclick="closeQRModal()" class="text-sm text-gray-400 hover:text-white transition-colors">Fechar</button>
+    </div>
+  </div>
+
+  <!-- ══ MEDIA MODAL ══ -->
+  <div id="media-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center" onclick="closeMediaModal()">
+    <div class="max-w-4xl max-h-[90vh] mx-4" onclick="event.stopPropagation()">
+      <img id="media-image" src="" class="hidden max-w-full max-h-[85vh] rounded-xl shadow-2xl" />
+      <iframe id="media-pdf" src="" class="hidden w-[80vw] h-[85vh] rounded-xl"></iframe>
+      <button onclick="closeMediaModal()" class="absolute top-4 right-4 text-white/70 hover:text-white text-2xl">&times;</button>
+    </div>
+  </div>
+
+  <!-- ══ MODAL: ESCOLHER INSTÂNCIA ══ -->
+  <div id="instance-picker-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+    <div class="bg-surface-900 border border-white/10 rounded-2xl p-6 max-w-md w-full mx-4">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h3 class="text-lg font-semibold text-white">Iniciar Conversa</h3>
+          <p id="picker-contact-info" class="text-xs text-gray-500 mt-0.5"></p>
+        </div>
+        <button onclick="closeInstancePicker()" class="text-gray-500 hover:text-white transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-sm text-gray-400 mb-4">Escolha a instância para enviar a primeira mensagem:</p>
+      <div id="picker-instances" class="space-y-2 mb-5"></div>
+      <div id="picker-none-online" class="hidden text-center py-4">
+        <p class="text-sm text-red-400">Nenhuma instância conectada</p>
+        <p class="text-xs text-gray-600 mt-1">Conecte pelo menos uma instância na aba Instâncias</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
