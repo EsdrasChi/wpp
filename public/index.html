@@ -1,26 +1,17 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="dark">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WPP Outbound</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/socket.io/socket.io.js"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script>
     tailwind.config = {
-      darkMode: "class",
       theme: {
         extend: {
-          fontFamily: { sans: ["Inter", "system-ui", "sans-serif"] },
-          colors: {
-            surface: { 50: "#f8fafc", 100: "#f1f5f9", 800: "#1e1e2e", 900: "#11111b", 950: "#0a0a14" },
-            accent: { 400: "#818cf8", 500: "#6366f1", 600: "#4f46e5" },
-            inst: {
-              1: "#22d3ee", 2: "#a78bfa", 3: "#34d399",
-              4: "#fb923c", 5: "#f472b6",
-            },
+          fontFamily: {
+            sans: ['Segoe UI', 'Helvetica Neue', 'Helvetica', 'Lucida Grande', 'Arial', 'Ubuntu', 'Cantarell', 'Fira Sans', 'sans-serif'],
           },
         },
       },
@@ -28,250 +19,279 @@
   </script>
   <link rel="stylesheet" href="/css/style.css" />
 </head>
-<body class="bg-surface-950 text-gray-200 font-sans h-screen overflow-hidden">
+<body class="bg-[#d1d7db] font-sans h-screen overflow-hidden">
 
-  <!-- ─── APP SHELL ─── -->
-  <div id="app" class="flex h-full">
+  <!-- Green header bar (WhatsApp Web background) -->
+  <div class="fixed top-0 left-0 right-0 h-[127px] bg-[#00a884] z-0"></div>
 
-    <!-- ══ SIDEBAR ══ -->
-    <aside id="sidebar" class="w-72 bg-surface-900 border-r border-white/5 flex flex-col shrink-0">
+  <!-- App container -->
+  <div id="app" class="relative z-10 mx-auto mt-[19px] mb-[19px] flex h-[calc(100vh-38px)] max-w-[1600px] shadow-lg overflow-hidden">
 
-      <!-- Logo -->
-      <div class="px-5 py-4 border-b border-white/5 flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-accent-500 flex items-center justify-center text-white font-bold text-sm">W</div>
-        <div>
-          <h1 class="text-sm font-semibold text-white tracking-tight">WPP Outbound</h1>
-          <p class="text-[10px] text-gray-500 uppercase tracking-widest">5-Instance Hub</p>
+    <!-- ══ NAV RAIL ══ -->
+    <nav id="nav-rail" class="w-[68px] bg-[#f0f2f5] border-r border-[#e9edef] flex flex-col items-center shrink-0">
+      <!-- Nav icons -->
+      <button onclick="switchView('inbox')" data-nav="inbox"
+        class="nav-btn w-full py-4 flex justify-center text-[#54656f] hover:bg-[#e9edef] transition-colors" title="Conversas">
+        <svg class="w-[22px] h-[22px]" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-2.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+      </button>
+      <button onclick="switchView('instances')" data-nav="instances"
+        class="nav-btn w-full py-4 flex justify-center text-[#54656f] hover:bg-[#e9edef] transition-colors" title="Instancias">
+        <svg class="w-[22px] h-[22px]" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      </button>
+      <button onclick="switchView('contacts')" data-nav="contacts"
+        class="nav-btn w-full py-4 flex justify-center text-[#54656f] hover:bg-[#e9edef] transition-colors relative" title="Contatos">
+        <svg class="w-[22px] h-[22px]" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+        <span id="pending-count-badge" class="absolute top-2 right-3 bg-[#25d366] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full hidden min-w-[16px] text-center">0</span>
+      </button>
+      <button onclick="switchView('crm')" data-nav="crm"
+        class="nav-btn w-full py-4 flex justify-center text-[#54656f] hover:bg-[#e9edef] transition-colors" title="CRM & Leads">
+        <svg class="w-[22px] h-[22px]" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      </button>
+      <button onclick="switchView('kanban')" data-nav="kanban"
+        class="nav-btn w-full py-4 flex justify-center text-[#54656f] hover:bg-[#e9edef] transition-colors" title="Kanban">
+        <svg class="w-[22px] h-[22px]" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
+      </button>
+
+      <!-- Session status dots (bottom) -->
+      <div class="mt-auto pb-4 flex flex-col items-center gap-2">
+        <div class="text-[8px] text-[#8696a0] uppercase tracking-widest mb-1">Sessoes</div>
+        <div id="sidebar-instances" class="flex flex-col items-center gap-1.5"></div>
+      </div>
+    </nav>
+
+    <!-- ══ LEFT PANEL (Contact List) ══ -->
+    <aside id="left-panel" class="w-[30%] min-w-[300px] max-w-[440px] bg-white border-r border-[#e9edef] flex flex-col shrink-0">
+
+      <!-- Panel header -->
+      <header class="h-[59px] bg-[#f0f2f5] flex items-center px-4 gap-3 shrink-0">
+        <div class="w-10 h-10 rounded-full bg-[#00a884] flex items-center justify-center">
+          <span class="text-white font-bold text-sm">W</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <span class="text-[15px] font-medium text-[#111b21]">WPP Outbound</span>
+          <p class="text-[10px] text-[#667781] uppercase tracking-wider">Multi-Instance Hub</p>
+        </div>
+      </header>
+
+      <!-- Search bar -->
+      <div class="px-2.5 py-1.5">
+        <div class="relative">
+          <svg class="w-[18px] h-[18px] absolute left-3 top-1/2 -translate-y-1/2 text-[#54656f]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input id="chat-search" type="text" placeholder="Pesquisar ou comecar uma nova conversa"
+            class="w-full bg-[#f0f2f5] border-none rounded-lg pl-10 pr-4 py-[7px] text-[13px] text-[#111b21] placeholder-[#667781] focus:outline-none" />
         </div>
       </div>
 
-      <!-- Nav -->
-      <nav class="flex-1 overflow-y-auto py-3 px-3 space-y-1">
-        <button onclick="switchView('inbox')" data-nav="inbox"
-          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-2.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
-          Inbox
-        </button>
-        <button onclick="switchView('instances')" data-nav="instances"
-          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-          Instâncias
-        </button>
-        <button onclick="switchView('contacts')" data-nav="contacts"
-          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-          Contatos
-          <span id="pending-count-badge" class="ml-auto bg-accent-500/20 text-accent-400 text-[10px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
-        </button>
-        <button onclick="switchView('crm')" data-nav="crm"
-          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          CRM & Leads
-        </button>
-        <button onclick="switchView('kanban')" data-nav="kanban"
-          class="nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
-          Kanban
-        </button>
-      </nav>
-
-      <!-- Instance status mini -->
-      <div class="px-3 pb-4">
-        <div class="text-[10px] text-gray-500 uppercase tracking-widest px-3 mb-2">Sessões</div>
-        <div id="sidebar-instances" class="space-y-1"></div>
+      <!-- Filter pills -->
+      <div class="px-2.5 py-1 flex gap-1.5 overflow-x-auto no-scrollbar">
+        <button id="chat-filter-all" onclick="setChatFilter('all')"
+          class="chat-filter-btn active-filter px-3 py-1.5 rounded-full text-[13px] font-normal whitespace-nowrap bg-[#00a884] text-white">Tudo</button>
+        <button id="chat-filter-unread" onclick="setChatFilter('unread')"
+          class="chat-filter-btn px-3 py-1.5 rounded-full text-[13px] font-normal whitespace-nowrap bg-[#e9edef] text-[#54656f] hover:bg-[#d1d7db]">Nao lidas</button>
+        <button id="chat-filter-favorites" onclick="setChatFilter('favorites')"
+          class="chat-filter-btn px-3 py-1.5 rounded-full text-[13px] font-normal whitespace-nowrap bg-[#e9edef] text-[#54656f] hover:bg-[#d1d7db]">Favoritas</button>
+        <button id="chat-filter-group" onclick="setChatFilter('group')"
+          class="chat-filter-btn px-3 py-1.5 rounded-full text-[13px] font-normal whitespace-nowrap bg-[#e9edef] text-[#54656f] hover:bg-[#d1d7db]">Grupos</button>
       </div>
+
+      <!-- Chat list -->
+      <div id="chat-list" class="flex-1 overflow-y-auto"></div>
     </aside>
 
-    <!-- ══ MAIN CONTENT ══ -->
-    <main class="flex-1 flex overflow-hidden">
+    <!-- ══ RIGHT PANEL ══ -->
+    <main id="right-panel" class="flex-1 flex flex-col overflow-hidden">
 
-      <!-- ── VIEW: INBOX ── -->
-      <div id="view-inbox" class="view flex w-full">
-        <!-- Chat list -->
-        <div class="w-80 bg-surface-900/50 border-r border-white/5 flex flex-col">
-          <div class="p-3 border-b border-white/5">
-            <div class="relative">
-              <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-              <input id="chat-search" type="text" placeholder="Buscar conversas..."
-                class="w-full bg-surface-800 border border-white/5 rounded-lg pl-10 pr-4 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50" />
-            </div>
-          </div>
-          <div id="chat-list" class="flex-1 overflow-y-auto"></div>
+      <!-- DEFAULT STATE: No chat selected -->
+      <div id="no-chat-selected" class="flex-1 flex flex-col items-center justify-center bg-[#f0f2f5] border-b-[6px] border-[#00a884]">
+        <div class="w-[72px] h-[72px] rounded-full bg-[#00a884]/10 flex items-center justify-center mb-6">
+          <svg class="w-9 h-9 text-[#00a884]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+          </svg>
         </div>
+        <h2 class="text-[32px] font-light text-[#41525d] mb-2">WPP Outbound</h2>
+        <p class="text-[14px] text-[#667781] text-center max-w-[480px] leading-5">
+          Envie e receba mensagens por multiplas instancias simultaneas.<br/>
+          Selecione uma conversa para comecar.
+        </p>
+      </div>
 
-        <!-- Chat thread -->
-        <div class="flex-1 flex flex-col">
-          <div id="chat-header" class="h-14 px-5 border-b border-white/5 flex items-center gap-3">
-            <p class="text-sm text-gray-500">Selecione uma conversa</p>
-          </div>
-          <div id="chat-messages" class="flex-1 overflow-y-auto p-5 space-y-3"></div>
-          <div id="chat-input-area" class="p-4 border-t border-white/5 hidden">
-            <!-- Hidden file inputs -->
-            <input type="file" id="file-image" accept="image/*" class="hidden" />
-            <input type="file" id="file-audio" accept="audio/*,.ogg,.mp3,.wav,.m4a" class="hidden" />
-            <input type="file" id="file-document" accept="*/*" class="hidden" />
-            <!-- Upload status -->
-            <div id="upload-status" class="hidden mb-2 flex items-center gap-2 text-xs text-accent-400">
-              <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
-              <span id="upload-status-text">Enviando arquivo...</span>
-            </div>
-            <div class="flex gap-2 items-center">
-              <select id="send-session-select" class="bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-accent-500/50">
-              </select>
-              <!-- Attachment buttons -->
-              <button onclick="document.getElementById('file-image').click()" class="flex items-center gap-1.5 px-2.5 py-2 text-gray-400 hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors border border-white/5 hover:border-green-500/20" title="Enviar imagem">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+      <!-- ACTIVE CHAT -->
+      <div id="active-chat" class="flex-1 flex flex-col hidden">
+        <!-- Chat header -->
+        <div id="chat-header" class="px-4 py-2 flex items-center gap-3 relative bg-[#f0f2f5] border-b border-[#e9edef]" style="min-height:59px;">
+          <p class="text-sm text-[#667781]">Selecione uma conversa</p>
+        </div>
+        <!-- Messages area -->
+        <div id="chat-messages" class="flex-1 overflow-y-auto px-[5%] lg:px-[7%] xl:px-[12%] py-2 wpp-chat-bg"></div>
+        <!-- Hidden file inputs -->
+        <input type="file" id="file-image" accept="image/*" class="hidden" />
+        <input type="file" id="file-audio" accept="audio/*,.ogg,.mp3,.wav,.m4a" class="hidden" />
+        <input type="file" id="file-document" accept="*/*" class="hidden" />
+        <!-- Upload status -->
+        <div id="upload-status" class="hidden flex items-center gap-2 text-xs px-4 py-1.5 bg-[#f0f2f5] text-[#00a884]">
+          <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+          <span id="upload-status-text">Enviando arquivo...</span>
+        </div>
+        <!-- Input area -->
+        <div id="chat-input-area" class="wpp-input-area flex items-center gap-2 hidden">
+          <!-- Session select -->
+          <select id="send-session-select" class="text-[11px] px-2 py-1 rounded bg-white border border-[#e9edef] text-[#667781] focus:outline-none max-w-[80px]">
+          </select>
+          <!-- Attachment -->
+          <div class="relative" id="attach-menu-wrap">
+            <button onclick="toggleAttachMenu()" class="wpp-icon-btn" title="Anexar">
+              <svg class="w-[26px] h-[26px]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+            </button>
+            <div id="attach-menu" class="hidden absolute bottom-full left-0 mb-2 rounded-xl overflow-hidden shadow-xl bg-white border border-[#e9edef]">
+              <button onclick="document.getElementById('file-image').click(); toggleAttachMenu();" class="flex items-center gap-3 px-4 py-2.5 text-sm text-[#111b21] hover:bg-[#f5f6f6] w-full text-left">
+                <svg class="w-5 h-5 text-[#7c3aed]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                Imagem
               </button>
-              <button onclick="document.getElementById('file-document').click()" class="flex items-center gap-1.5 px-2.5 py-2 text-gray-400 hover:text-orange-400 hover:bg-orange-500/10 rounded-lg transition-colors border border-white/5 hover:border-orange-500/20" title="Enviar documento">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
-              </button>
-              <!-- Normal input -->
-              <div id="input-normal" class="flex-1 flex gap-2 items-center">
-                <input id="chat-input" type="text" placeholder="Digite sua mensagem..."
-                  class="flex-1 bg-surface-800 border border-white/5 rounded-lg px-4 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50" />
-              </div>
-              <!-- Recording bar (hidden by default) -->
-              <div id="input-recording" class="flex-1 hidden flex items-center gap-3">
-                <button onclick="cancelRecording()" class="text-gray-500 hover:text-red-400 transition-colors shrink-0" title="Cancelar">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                </button>
-                <div class="flex items-center gap-2 flex-1 bg-surface-800 border border-red-500/20 rounded-lg px-3 py-1.5">
-                  <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0"></div>
-                  <span id="recording-timer" class="text-xs text-red-400 font-mono min-w-[36px]">0:00</span>
-                  <canvas id="waveform-canvas" class="flex-1 h-8"></canvas>
-                </div>
-              </div>
-              <!-- Send / Mic button -->
-              <button id="btn-send" onclick="sendMessage()"
-                class="bg-accent-500 hover:bg-accent-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
-                Enviar
-              </button>
-              <button id="btn-record" onclick="toggleRecording()" class="flex items-center gap-1.5 px-2.5 py-2 text-gray-400 hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition-colors border border-white/5 hover:border-purple-500/20" title="Gravar audio">
-                <svg id="mic-icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
-                <svg id="stop-icon" class="w-4 h-4 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm3 13H9V9h6v6z"/></svg>
+              <button onclick="document.getElementById('file-document').click(); toggleAttachMenu();" class="flex items-center gap-3 px-4 py-2.5 text-sm text-[#111b21] hover:bg-[#f5f6f6] w-full text-left">
+                <svg class="w-5 h-5 text-[#2563eb]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                Documento
               </button>
             </div>
           </div>
+          <!-- Normal input -->
+          <div id="input-normal" class="flex-1">
+            <input id="chat-input" type="text" placeholder="Digite uma mensagem" class="wpp-input" />
+          </div>
+          <!-- Recording bar (hidden) -->
+          <div id="input-recording" class="flex-1 hidden flex items-center gap-3">
+            <button onclick="cancelRecording()" class="wpp-icon-btn text-[#ef4444]" title="Cancelar">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+            <div class="flex items-center gap-2 flex-1 rounded-lg px-3 py-1.5 bg-white border border-[#e9edef]">
+              <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0"></div>
+              <span id="recording-timer" class="text-xs text-[#ef4444] font-mono min-w-[36px]">0:00</span>
+              <canvas id="waveform-canvas" class="flex-1 h-8"></canvas>
+            </div>
+          </div>
+          <!-- Send / Mic -->
+          <button id="btn-send" onclick="sendMessage()" class="wpp-send-btn hidden" title="Enviar">
+            <svg class="w-[26px] h-[26px]" viewBox="0 0 24 24" fill="currentColor"><path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/></svg>
+          </button>
+          <button id="btn-record" onclick="toggleRecording()" class="wpp-icon-btn" title="Gravar audio">
+            <svg id="mic-icon" class="w-[26px] h-[26px]" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+            <svg id="stop-icon" class="w-[26px] h-[26px] hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm3 13H9V9h6v6z"/></svg>
+          </button>
         </div>
       </div>
 
-      <!-- ── VIEW: INSTANCES ── -->
-      <div id="view-instances" class="view hidden w-full overflow-y-auto p-6">
-        <h2 class="text-xl font-semibold text-white mb-6">Gerenciamento de Instâncias</h2>
+      <!-- ── ADMIN VIEWS (shown in right panel) ── -->
+
+      <!-- VIEW: INSTANCES -->
+      <div id="view-instances" class="view hidden w-full overflow-y-auto p-6 bg-white">
+        <h2 class="text-xl font-semibold text-[#111b21] mb-6">Gerenciamento de Instancias</h2>
         <div id="instances-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
       </div>
 
-      <!-- ── VIEW: CONTATOS ── -->
-      <div id="view-contacts" class="view hidden w-full overflow-y-auto p-6">
+      <!-- VIEW: CONTACTS -->
+      <div id="view-contacts" class="view hidden w-full overflow-y-auto p-6 bg-white">
         <div class="flex items-center justify-between mb-6">
           <div>
-            <h2 class="text-xl font-semibold text-white">Contatos</h2>
-            <p class="text-xs text-gray-500 mt-1">Gerencie seus contatos e inicie conversas</p>
+            <h2 class="text-xl font-semibold text-[#111b21]">Contatos</h2>
+            <p class="text-xs text-[#667781] mt-1">Gerencie seus contatos e inicie conversas</p>
           </div>
           <div class="flex items-center gap-3">
             <input id="contacts-search" type="text" placeholder="Buscar contato..."
               oninput="renderContactsView()"
-              class="bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50 w-56" />
+              class="bg-[#f0f2f5] border border-[#e9edef] rounded-lg px-3 py-2 text-sm text-[#111b21] placeholder-[#667781] focus:outline-none focus:border-[#00a884]/50 w-56" />
           </div>
         </div>
-
-        <!-- Tabs: Pendentes / Contatados -->
-        <div class="flex gap-1 mb-5 bg-surface-900 rounded-lg p-1 w-fit">
+        <!-- Tabs -->
+        <div class="flex gap-1 mb-5 bg-[#f0f2f5] rounded-lg p-1 w-fit">
           <button id="tab-pending" onclick="setContactTab('pending')"
-            class="contact-tab px-4 py-2 rounded-md text-xs font-medium transition-colors bg-accent-500/15 text-accent-400">
+            class="contact-tab active-tab px-4 py-2 rounded-md text-xs font-medium transition-colors">
             Aguardando contato
-            <span id="tab-pending-count" class="ml-1 bg-accent-500/30 text-accent-300 px-1.5 py-0.5 rounded-full text-[10px]">0</span>
+            <span id="tab-pending-count" class="ml-1 bg-[#00a884]/20 text-[#00a884] px-1.5 py-0.5 rounded-full text-[10px]">0</span>
           </button>
           <button id="tab-contacted" onclick="setContactTab('contacted')"
-            class="contact-tab px-4 py-2 rounded-md text-xs font-medium transition-colors text-gray-500 hover:text-gray-300">
+            class="contact-tab px-4 py-2 rounded-md text-xs font-medium transition-colors text-[#667781] hover:text-[#111b21]">
             Ja contatados
             <span id="tab-contacted-count" class="ml-1 text-[10px]">0</span>
           </button>
         </div>
-
-        <!-- Lista de contatos -->
         <div id="contacts-list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
         <div id="contacts-empty" class="hidden py-16 text-center">
-          <svg class="w-12 h-12 mx-auto text-gray-700 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-          <p class="text-gray-600 text-sm" id="contacts-empty-text">Nenhum contato pendente</p>
-          <p class="text-gray-700 text-xs mt-1">Adicione contatos na aba CRM & Leads</p>
+          <svg class="w-12 h-12 mx-auto text-[#8696a0] mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          <p class="text-[#667781] text-sm" id="contacts-empty-text">Nenhum contato pendente</p>
+          <p class="text-[#8696a0] text-xs mt-1">Adicione contatos na aba CRM & Leads</p>
         </div>
       </div>
 
-      <!-- ── VIEW: CRM ── -->
-      <div id="view-crm" class="view hidden w-full overflow-y-auto p-6">
-        <h2 class="text-xl font-semibold text-white mb-6">CRM & Outbound</h2>
-
-        <!-- Adicionar Contato Manual -->
-        <div class="bg-surface-900 border border-white/5 rounded-xl p-6 mb-6">
-          <h3 class="text-sm font-medium text-gray-300 mb-4">Adicionar Contato</h3>
+      <!-- VIEW: CRM -->
+      <div id="view-crm" class="view hidden w-full overflow-y-auto p-6 bg-white">
+        <h2 class="text-xl font-semibold text-[#111b21] mb-6">CRM & Outbound</h2>
+        <!-- Add Contact -->
+        <div class="bg-white border border-[#e9edef] rounded-xl p-6 mb-6">
+          <h3 class="text-sm font-medium text-[#111b21] mb-4">Adicionar Contato</h3>
           <div class="flex gap-3 items-end flex-wrap">
             <div class="flex-1 min-w-[180px]">
-              <label class="text-xs text-gray-500 mb-1 block">Nome</label>
-              <input id="contact-name" type="text" placeholder="Ex: João Silva"
-                class="w-full bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50" />
+              <label class="text-xs text-[#667781] mb-1 block">Nome</label>
+              <input id="contact-name" type="text" placeholder="Ex: Joao Silva"
+                class="w-full bg-[#f0f2f5] border border-[#e9edef] rounded-lg px-3 py-2 text-sm text-[#111b21] placeholder-[#667781] focus:outline-none focus:border-[#00a884]/50" />
             </div>
             <div class="flex-1 min-w-[180px]">
-              <label class="text-xs text-gray-500 mb-1 block">Número (com DDD)</label>
+              <label class="text-xs text-[#667781] mb-1 block">Numero (com DDD)</label>
               <input id="contact-number" type="text" placeholder="Ex: 5511999998888"
-                class="w-full bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50" />
+                class="w-full bg-[#f0f2f5] border border-[#e9edef] rounded-lg px-3 py-2 text-sm text-[#111b21] placeholder-[#667781] focus:outline-none focus:border-[#00a884]/50" />
             </div>
             <button onclick="addManualContact()"
-              class="bg-accent-500 hover:bg-accent-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
+              class="bg-[#00a884] hover:bg-[#008f72] text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
               + Adicionar
             </button>
-            <span id="contact-status" class="text-xs text-gray-500"></span>
+            <span id="contact-status" class="text-xs text-[#667781]"></span>
           </div>
         </div>
-
-        <!-- Upload CSV -->
-        <div class="bg-surface-900 border border-white/5 rounded-xl p-6 mb-6">
-          <h3 class="text-sm font-medium text-gray-300 mb-4">Importar Leads (CSV)</h3>
-          <p class="text-xs text-gray-500 mb-3">Formato esperado: colunas <code class="text-accent-400">nome</code> e <code class="text-accent-400">numero</code></p>
+        <!-- CSV Upload -->
+        <div class="bg-white border border-[#e9edef] rounded-xl p-6 mb-6">
+          <h3 class="text-sm font-medium text-[#111b21] mb-4">Importar Leads (CSV)</h3>
+          <p class="text-xs text-[#667781] mb-3">Formato esperado: colunas <code class="text-[#00a884] font-medium">nome</code> e <code class="text-[#00a884] font-medium">numero</code></p>
           <div class="flex gap-3 items-center">
-            <label class="flex items-center gap-2 bg-surface-800 hover:bg-surface-800/80 border border-white/10 rounded-lg px-4 py-2 text-sm cursor-pointer transition-colors">
-              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-              <span class="text-gray-400">Escolher arquivo</span>
+            <label class="flex items-center gap-2 bg-[#f0f2f5] hover:bg-[#e9edef] border border-[#e9edef] rounded-lg px-4 py-2 text-sm cursor-pointer transition-colors">
+              <svg class="w-4 h-4 text-[#54656f]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+              <span class="text-[#54656f]">Escolher arquivo</span>
               <input id="csv-file" type="file" accept=".csv" class="hidden" onchange="uploadCSV()" />
             </label>
-            <span id="csv-status" class="text-xs text-gray-500"></span>
+            <span id="csv-status" class="text-xs text-[#667781]"></span>
           </div>
         </div>
-
         <!-- Leads Table -->
-        <div class="bg-surface-900 border border-white/5 rounded-xl overflow-hidden">
-          <div class="p-4 border-b border-white/5 flex items-center justify-between">
-            <h3 class="text-sm font-medium text-gray-300">Leads</h3>
+        <div class="bg-white border border-[#e9edef] rounded-xl overflow-hidden">
+          <div class="p-4 border-b border-[#e9edef] flex items-center justify-between">
+            <h3 class="text-sm font-medium text-[#111b21]">Leads</h3>
             <input id="lead-search" type="text" placeholder="Buscar lead..."
-              class="bg-surface-800 border border-white/5 rounded-lg px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50 w-56" oninput="filterLeads()" />
+              class="bg-[#f0f2f5] border border-[#e9edef] rounded-lg px-3 py-1.5 text-xs text-[#111b21] placeholder-[#667781] focus:outline-none focus:border-[#00a884]/50 w-56" oninput="filterLeads()" />
           </div>
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead>
-                <tr class="text-left text-xs text-gray-500 uppercase tracking-wider">
+                <tr class="text-left text-xs text-[#667781] uppercase tracking-wider">
                   <th class="px-4 py-3 font-medium">Nome</th>
-                  <th class="px-4 py-3 font-medium">Número</th>
-                  <th class="px-4 py-3 font-medium text-right">Ação</th>
+                  <th class="px-4 py-3 font-medium">Numero</th>
+                  <th class="px-4 py-3 font-medium text-right">Acao</th>
                 </tr>
               </thead>
-              <tbody id="leads-tbody" class="divide-y divide-white/5"></tbody>
+              <tbody id="leads-tbody" class="divide-y divide-[#e9edef]"></tbody>
             </table>
           </div>
-          <div id="leads-empty" class="p-10 text-center text-gray-600 text-sm">
-            Nenhum lead importado. Faça upload de um CSV acima.
+          <div id="leads-empty" class="p-10 text-center text-[#667781] text-sm">
+            Nenhum lead importado. Faca upload de um CSV acima.
           </div>
         </div>
       </div>
 
-      <!-- ── VIEW: KANBAN ── -->
-      <div id="view-kanban" class="view hidden w-full overflow-x-auto overflow-y-hidden p-6">
+      <!-- VIEW: KANBAN -->
+      <div id="view-kanban" class="view hidden w-full overflow-x-auto overflow-y-hidden p-6 bg-white">
         <div class="mb-5 flex items-center justify-between">
           <div>
-            <h2 class="text-xl font-semibold text-white">Kanban</h2>
-            <p class="text-xs text-gray-500 mt-1">Acompanhe o funil de leads visualmente</p>
+            <h2 class="text-xl font-semibold text-[#111b21]">Kanban</h2>
+            <p class="text-xs text-[#667781] mt-1">Acompanhe o funil de leads visualmente</p>
           </div>
           <button onclick="loadKanbanData()"
-            class="bg-accent-500/10 hover:bg-accent-500/20 text-accent-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+            class="bg-[#00a884]/10 hover:bg-[#00a884]/20 text-[#00a884] px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
             Atualizar
           </button>
@@ -283,62 +303,62 @@
   </div>
 
   <!-- ══ QR CODE MODAL ══ -->
-  <div id="qr-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center">
-    <div class="bg-surface-900 border border-white/10 rounded-2xl p-8 text-center max-w-sm w-full mx-4">
-      <h3 id="qr-modal-title" class="text-lg font-semibold text-white mb-4">Escanear QR Code</h3>
-      <div id="qr-container" class="bg-white rounded-xl p-4 inline-block mb-4">
+  <div id="qr-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+    <div class="bg-white border border-[#e9edef] rounded-2xl p-8 text-center max-w-sm w-full mx-4 shadow-xl">
+      <h3 id="qr-modal-title" class="text-lg font-semibold text-[#111b21] mb-4">Escanear QR Code</h3>
+      <div id="qr-container" class="bg-white rounded-xl p-4 inline-block mb-4 border border-[#e9edef]">
         <img id="qr-image" src="" alt="QR Code" class="w-64 h-64" />
       </div>
-      <p class="text-xs text-gray-500 mb-4">Abra o WhatsApp e escaneie o código</p>
-      <button onclick="closeQRModal()" class="text-sm text-gray-400 hover:text-white transition-colors">Fechar</button>
+      <p class="text-xs text-[#667781] mb-4">Abra o WhatsApp e escaneie o codigo</p>
+      <button onclick="closeQRModal()" class="text-sm text-[#667781] hover:text-[#111b21] transition-colors">Fechar</button>
     </div>
   </div>
 
   <!-- ══ MEDIA MODAL ══ -->
   <div id="media-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center" onclick="closeMediaModal()">
-    <div class="max-w-4xl max-h-[90vh] mx-4" onclick="event.stopPropagation()">
+    <div class="max-w-4xl max-h-[90vh] mx-4 relative" onclick="event.stopPropagation()">
       <img id="media-image" src="" class="hidden max-w-full max-h-[85vh] rounded-xl shadow-2xl" />
       <iframe id="media-pdf" src="" class="hidden w-[80vw] h-[85vh] rounded-xl"></iframe>
       <button onclick="closeMediaModal()" class="absolute top-4 right-4 text-white/70 hover:text-white text-2xl">&times;</button>
     </div>
   </div>
 
-  <!-- ══ MODAL: ESCOLHER INSTÂNCIA ══ -->
-  <div id="instance-picker-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center">
-    <div class="bg-surface-900 border border-white/10 rounded-2xl p-6 max-w-md w-full mx-4">
+  <!-- ══ INSTANCE PICKER MODAL ══ -->
+  <div id="instance-picker-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+    <div class="bg-white border border-[#e9edef] rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl">
       <div class="flex items-center justify-between mb-5">
         <div>
-          <h3 class="text-lg font-semibold text-white">Iniciar Conversa</h3>
-          <p id="picker-contact-info" class="text-xs text-gray-500 mt-0.5"></p>
+          <h3 class="text-lg font-semibold text-[#111b21]">Iniciar Conversa</h3>
+          <p id="picker-contact-info" class="text-xs text-[#667781] mt-0.5"></p>
         </div>
-        <button onclick="closeInstancePicker()" class="text-gray-500 hover:text-white transition-colors">
+        <button onclick="closeInstancePicker()" class="text-[#667781] hover:text-[#111b21] transition-colors">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
-      <p class="text-sm text-gray-400 mb-4">Escolha a instância para enviar a primeira mensagem:</p>
+      <p class="text-sm text-[#667781] mb-4">Escolha a instancia para enviar a primeira mensagem:</p>
       <div id="picker-instances" class="space-y-2 mb-5"></div>
       <div id="picker-none-online" class="hidden text-center py-4">
-        <p class="text-sm text-red-400">Nenhuma instância conectada</p>
-        <p class="text-xs text-gray-600 mt-1">Conecte pelo menos uma instância na aba Instâncias</p>
+        <p class="text-sm text-[#ef4444]">Nenhuma instancia conectada</p>
+        <p class="text-xs text-[#8696a0] mt-1">Conecte pelo menos uma instancia na aba Instancias</p>
       </div>
     </div>
   </div>
 
   <!-- ══ KANBAN CARD MODAL ══ -->
-  <div id="kanban-card-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center">
-    <div class="bg-surface-900 border border-white/10 rounded-2xl p-6 max-w-lg w-full mx-4">
+  <div id="kanban-card-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+    <div class="bg-white border border-[#e9edef] rounded-2xl p-6 max-w-lg w-full mx-4 shadow-xl">
       <div class="flex items-center justify-between mb-5">
         <div class="flex-1">
-          <h3 id="kanban-card-name" class="text-lg font-semibold text-white">Nome</h3>
-          <p id="kanban-card-number" class="text-xs text-gray-500 font-mono mt-0.5">Numero</p>
+          <h3 id="kanban-card-name" class="text-lg font-semibold text-[#111b21]">Nome</h3>
+          <p id="kanban-card-number" class="text-xs text-[#667781] font-mono mt-0.5">Numero</p>
         </div>
-        <button onclick="closeKanbanCardModal()" class="text-gray-500 hover:text-white transition-colors">
+        <button onclick="closeKanbanCardModal()" class="text-[#667781] hover:text-[#111b21] transition-colors">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
       <div class="mb-4">
-        <label class="text-xs text-gray-500 mb-2 block">Estagio</label>
-        <select id="kanban-card-stage" class="w-full bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-accent-500/50">
+        <label class="text-xs text-[#667781] mb-2 block">Estagio</label>
+        <select id="kanban-card-stage" class="w-full bg-[#f0f2f5] border border-[#e9edef] rounded-lg px-3 py-2 text-sm text-[#111b21] focus:outline-none focus:border-[#00a884]/50">
           <option value="novo">Novo</option>
           <option value="tentativa_de_contato">Tentativa de contato</option>
           <option value="conectado">Conectado</option>
@@ -349,19 +369,19 @@
         </select>
       </div>
       <div class="mb-5">
-        <label class="text-xs text-gray-500 mb-2 block">Notas</label>
+        <label class="text-xs text-[#667781] mb-2 block">Notas</label>
         <textarea id="kanban-card-notes" rows="4"
-          class="w-full bg-surface-800 border border-white/5 rounded-lg px-3 py-2 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-500/50 resize-none"
+          class="w-full bg-[#f0f2f5] border border-[#e9edef] rounded-lg px-3 py-2 text-sm text-[#111b21] placeholder-[#667781] focus:outline-none focus:border-[#00a884]/50 resize-none"
           placeholder="Adicione observacoes sobre este lead..."></textarea>
       </div>
       <div class="flex gap-2">
         <button onclick="openChatFromKanban()"
-          class="flex-1 bg-accent-500/10 hover:bg-accent-500/20 text-accent-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+          class="flex-1 bg-[#00a884]/10 hover:bg-[#00a884]/20 text-[#00a884] px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
           Abrir Chat
         </button>
         <button onclick="saveKanbanCard()"
-          class="flex-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          class="flex-1 bg-[#00a884] hover:bg-[#008f72] text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
           Salvar
         </button>
       </div>

@@ -108,8 +108,8 @@ async function getKanbanBoard() {
 
   const stages = {
     novo: [], tentativa_de_contato: [], conectado: [],
-    consultoria_agendada: [], consultoria_realizada: [],
-    no_show: [], perdido: [],
+    conectado_com_secretario: [], consultoria_agendada: [],
+    consultoria_realizada: [], no_show: [], perdido: [],
   };
   for (const row of data) {
     const c = _dbToContact(row);
@@ -136,18 +136,29 @@ function _dbToContact(row) {
 // ── Mensagens ──
 
 async function saveMessage(msg) {
-  const { error } = await supabase.from("messages").upsert({
+  const chatJid = msg.chatJid || "";
+  const baseData = {
     id: msg.id,
     session_id: msg.sessionId,
-    chat_jid: msg.chatJid,
+    chat_jid: chatJid,
     from_me: msg.fromMe,
     push_name: msg.pushName || "",
     type: msg.type,
     body: msg.body || "",
     media_url: msg.mediaUrl || null,
     timestamp: new Date(msg.timestamp).toISOString(),
+  };
+  // Tentar com campos extras (is_group, participant)
+  const { error } = await supabase.from("messages").upsert({
+    ...baseData,
+    is_group: chatJid.endsWith("@g.us"),
+    participant: msg.participant || null,
   }, { onConflict: "id,session_id" });
-  if (error) console.error("[DB] saveMessage:", error.message);
+  if (error) {
+    // Fallback: salvar sem campos extras (colunas podem nao existir)
+    const { error: err2 } = await supabase.from("messages").upsert(baseData, { onConflict: "id,session_id" });
+    if (err2) console.error("[DB] saveMessage:", err2.message);
+  }
 }
 
 async function getMessages(chatJid, limit = 500) {
@@ -168,7 +179,16 @@ async function getChats() {
     // Fallback: buscar manualmente se a função RPC não existir
     return await _getChatsFallback();
   }
-  return data || [];
+  // Normalizar campos do RPC (chat_jid -> jid, session_id -> lastSessionId, etc.)
+  return (data || []).map(row => ({
+    jid: row.jid || row.chat_jid || "",
+    lastMessage: row.lastMessage || row.last_message || row.body || "",
+    lastTimestamp: row.lastTimestamp || (row.last_timestamp ? new Date(row.last_timestamp).getTime() : 0) || (row.timestamp ? new Date(row.timestamp).getTime() : 0),
+    lastSessionId: row.lastSessionId || row.last_session_id || row.session_id || "",
+    pushName: row.pushName || row.push_name || "",
+    sessions: row.sessions || (row.lastSessionId ? [row.lastSessionId] : row.last_session_id ? [row.last_session_id] : []),
+    isGroup: row.isGroup != null ? row.isGroup : row.is_group != null ? row.is_group : (row.jid || row.chat_jid || "").endsWith("@g.us"),
+  }));
 }
 
 async function _getChatsFallback() {
@@ -189,6 +209,7 @@ async function _getChatsFallback() {
         lastSessionId: row.session_id,
         pushName: row.push_name || jid.split("@")[0],
         sessions: [row.session_id],
+        isGroup: jid.endsWith("@g.us"),
       });
     } else {
       const existing = chatMap.get(jid);
@@ -201,16 +222,19 @@ async function _getChatsFallback() {
 }
 
 function _dbToMessage(row) {
+  const chatJid = row.chat_jid || "";
   return {
     id: row.id,
     sessionId: row.session_id,
-    chatJid: row.chat_jid,
+    chatJid,
     fromMe: row.from_me,
     pushName: row.push_name || "",
     type: row.type,
     body: row.body || "",
     mediaUrl: row.media_url || null,
     timestamp: new Date(row.timestamp).getTime(),
+    isGroup: row.is_group != null ? row.is_group : chatJid.endsWith("@g.us"),
+    participant: row.participant || null,
   };
 }
 
@@ -275,7 +299,9 @@ async function migrateFromFile(contacts, customNames) {
 
 async function testConnection() {
   try {
-    const { error } = await supabase.from("contacts").select("count", { count: "exact", head: true });
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s)")), 10000));
+    const query = supabase.from("contacts").select("count", { count: "exact", head: true });
+    const { error } = await Promise.race([query, timeout]);
     if (error) throw error;
     console.log("[DB] Conectado ao Supabase com sucesso");
     return true;
@@ -283,6 +309,12 @@ async function testConnection() {
     console.error("[DB] Falha ao conectar ao Supabase:", err.message);
     return false;
   }
+}
+
+async function deleteMessages(chatJid) {
+  const { error } = await supabase.from("messages").delete().eq("chat_jid", chatJid);
+  if (error) { console.error("[DB] deleteMessages:", error.message); return { success: false }; }
+  return { success: true };
 }
 
 module.exports = {
@@ -302,6 +334,7 @@ module.exports = {
   saveMessage,
   getMessages,
   getChats,
+  deleteMessages,
   // Session names
   getSessionNames,
   saveSessionName,

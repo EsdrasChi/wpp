@@ -14,7 +14,7 @@ const db = require("./database");
 
 const SESSION_DIR = path.resolve(process.env.SESSION_DIR || "./sessions");
 const MAX_INSTANCES = parseInt(process.env.MAX_INSTANCES || "5", 10);
-const KANBAN_STAGES = ['novo','tentativa_de_contato','conectado','consultoria_agendada','consultoria_realizada','no_show','perdido'];
+const KANBAN_STAGES = ['novo','tentativa_de_contato','conectado','conectado_com_secretario','consultoria_agendada','consultoria_realizada','no_show','perdido'];
 
 const BROWSER_PROFILES = [
   ["Chrome", "MacOS", "122.0.6261.94"],
@@ -33,6 +33,9 @@ class SessionManager {
     this.customNames = new Map();
     this.sentMediaUrls = new Map();
     this.contacts = []; // cache local
+    this.groupMetadata = new Map(); // cache: groupJid -> { subject, participants }
+    this.lidToPhone = new Map(); // LID -> phone JID mapping (e.g. "281380604874829@lid" -> "5531999999999@s.whatsapp.net")
+    this.useFallback = false; // true quando Supabase não está disponível
     this.logger = pino({ level: process.env.LOG_LEVEL || "error" });
     fs.mkdirSync(SESSION_DIR, { recursive: true });
   }
@@ -42,7 +45,8 @@ class SessionManager {
     const connected = await db.testConnection();
     if (!connected) {
       console.error("[SessionManager] Não foi possível conectar ao Supabase. Verifique as credenciais no .env");
-      console.error("[SessionManager] Usando fallback local (dados não serão persistidos no banco)");
+      console.error("[SessionManager] Usando fallback local (dados persistidos em arquivo)");
+      this.useFallback = true;
       this._loadDataFromFile();
       return;
     }
@@ -104,13 +108,32 @@ class SessionManager {
           notes: c.notes || '',
         }));
       }
-    } catch (_) {}
+      console.log(`[SessionManager] Fallback: ${this.contacts.length} contatos, ${this.customNames.size} nomes de sessão carregados do arquivo`);
+    } catch (_) {
+      console.log("[SessionManager] Fallback: nenhum arquivo _appdata.json encontrado, iniciando vazio");
+    }
+  }
+
+  _saveDataToFile() {
+    try {
+      const data = {
+        contacts: this.contacts,
+        customNames: Object.fromEntries(this.customNames),
+      };
+      fs.writeFileSync(path.join(SESSION_DIR, "_appdata.json"), JSON.stringify(data, null, 2), "utf-8");
+    } catch (err) {
+      console.error("[SessionManager] Erro ao salvar _appdata.json:", err.message);
+    }
   }
 
   // ── Renomear instância ──
   async renameSession(sessionId, customName) {
     this.customNames.set(sessionId, customName);
-    await db.saveSessionName(sessionId, customName);
+    if (this.useFallback) {
+      this._saveDataToFile();
+    } else {
+      await db.saveSessionName(sessionId, customName);
+    }
     this._emitStatus(sessionId, this.sessions.get(sessionId)?.status || "disconnected");
     return { success: true };
   }
@@ -120,15 +143,33 @@ class SessionManager {
     const clean = String(numero).replace(/\D/g, "");
     if (!clean) return { success: false, message: "Número inválido" };
 
+    if (this.useFallback) {
+      if (this.contacts.find(c => c.numero === clean)) {
+        return { success: false, message: "Contato já existe" };
+      }
+      const contact = {
+        nome, numero: clean, contacted: false, contactedAt: null,
+        contactedVia: null, stage: "novo", stageUpdatedAt: Date.now(), notes: "",
+      };
+      this.contacts.push(contact);
+      this._saveDataToFile();
+      return { success: true, contact };
+    }
+
     const result = await db.addContact(nome, clean);
     if (result.success) {
-      this.contacts = await db.getContacts(); // refresh cache
+      this.contacts = await db.getContacts();
     }
     return result;
   }
 
   async removeContact(numero) {
     const clean = String(numero).replace(/\D/g, "");
+    if (this.useFallback) {
+      this.contacts = this.contacts.filter(c => c.numero !== clean);
+      this._saveDataToFile();
+      return { success: true };
+    }
     const result = await db.removeContact(clean);
     if (result.success) {
       this.contacts = this.contacts.filter(c => c.numero !== clean);
@@ -138,9 +179,22 @@ class SessionManager {
 
   async markContacted(numero, sessionId) {
     const clean = String(numero).replace(/\D/g, "");
+    if (this.useFallback) {
+      const idx = this.contacts.findIndex(c => c.numero === clean);
+      if (idx < 0) return { success: false, message: "Contato não encontrado" };
+      const now = Date.now();
+      this.contacts[idx].contacted = true;
+      this.contacts[idx].contactedAt = now;
+      this.contacts[idx].contactedVia = sessionId;
+      if (this.contacts[idx].stage === "novo") {
+        this.contacts[idx].stage = "tentativa_de_contato";
+        this.contacts[idx].stageUpdatedAt = now;
+      }
+      this._saveDataToFile();
+      return { success: true, contact: this.contacts[idx] };
+    }
     const result = await db.markContacted(clean, sessionId);
     if (result.success) {
-      // Atualizar cache local
       const idx = this.contacts.findIndex(c => c.numero === clean);
       if (idx >= 0) this.contacts[idx] = result.contact;
     }
@@ -148,16 +202,19 @@ class SessionManager {
   }
 
   async getContacts() {
+    if (this.useFallback) return this.contacts;
     this.contacts = await db.getContacts();
     return this.contacts;
   }
 
   async getPendingContacts() {
+    if (this.useFallback) return this.contacts.filter(c => !c.contacted);
     const all = await db.getContacts();
     return all.filter(c => !c.contacted);
   }
 
   async getContactedContacts() {
+    if (this.useFallback) return this.contacts.filter(c => c.contacted);
     const all = await db.getContacts();
     return all.filter(c => c.contacted);
   }
@@ -165,6 +222,14 @@ class SessionManager {
   async updateContactStage(numero, stage) {
     if (!KANBAN_STAGES.includes(stage)) return { success: false, message: 'Estágio inválido' };
     const clean = String(numero).replace(/\D/g, '');
+    if (this.useFallback) {
+      const idx = this.contacts.findIndex(c => c.numero === clean);
+      if (idx < 0) return { success: false, message: 'Contato não encontrado' };
+      this.contacts[idx].stage = stage;
+      this.contacts[idx].stageUpdatedAt = Date.now();
+      this._saveDataToFile();
+      return { success: true, contact: this.contacts[idx] };
+    }
     const result = await db.updateStage(clean, stage);
     if (result.success) {
       const idx = this.contacts.findIndex(c => c.numero === clean);
@@ -175,6 +240,13 @@ class SessionManager {
 
   async updateContactNotes(numero, notes) {
     const clean = String(numero).replace(/\D/g, '');
+    if (this.useFallback) {
+      const idx = this.contacts.findIndex(c => c.numero === clean);
+      if (idx < 0) return { success: false, message: 'Contato não encontrado' };
+      this.contacts[idx].notes = notes || '';
+      this._saveDataToFile();
+      return { success: true, contact: this.contacts[idx] };
+    }
     const result = await db.updateNotes(clean, notes);
     if (result.success) {
       const idx = this.contacts.findIndex(c => c.numero === clean);
@@ -184,6 +256,22 @@ class SessionManager {
   }
 
   async getKanbanBoard() {
+    if (this.useFallback) {
+      const stages = {
+        novo: [], tentativa_de_contato: [], conectado: [],
+        conectado_com_secretario: [], consultoria_agendada: [],
+        consultoria_realizada: [], no_show: [], perdido: [],
+      };
+      for (const c of this.contacts) {
+        const s = c.stage || "novo";
+        if (stages[s]) stages[s].push(c);
+      }
+      // Ordenar por stageUpdatedAt desc dentro de cada coluna
+      for (const key of Object.keys(stages)) {
+        stages[key].sort((a, b) => (b.stageUpdatedAt || 0) - (a.stageUpdatedAt || 0));
+      }
+      return stages;
+    }
     return await db.getKanbanBoard();
   }
 
@@ -270,19 +358,79 @@ class SessionManager {
           if (msg.key.fromMe && !msg.message) continue;
           const formatted = await this._storeMessage(sessionId, msg);
           if (!formatted) continue;
-          // Não emitir fromMe — o frontend já mostra localmente
-          if (!msg.key.fromMe) {
-            this.io.emit("message:new", {
-              sessionId,
-              message: formatted,
-            });
+
+          // Buscar nome do grupo se for mensagem de grupo
+          let groupName = null;
+          if (formatted.isGroup) {
+            groupName = await this._getGroupName(sessionId, formatted.chatJid);
           }
+
+          this.io.emit("message:new", {
+            sessionId,
+            message: formatted,
+            groupName,
+          });
         }
       });
 
       sock.ev.on("messages.update", (updates) => {
         for (const update of updates) {
           this.io.emit("message:update", { sessionId, update });
+        }
+      });
+
+      // ── LID→Phone mappings de contatos e histórico ──
+      sock.ev.on("contacts.upsert", (contacts) => {
+        for (const c of contacts) {
+          if (c.lid && c.id && String(c.id).endsWith("@s.whatsapp.net")) {
+            const lid = this._stripDeviceSuffix(c.lid);
+            const phone = this._stripDeviceSuffix(c.id);
+            this.lidToPhone.set(lid, phone);
+          }
+          if (c.lid && c.jid) {
+            const lid = this._stripDeviceSuffix(c.lid);
+            const phone = this._stripDeviceSuffix(c.jid);
+            if (phone.endsWith("@s.whatsapp.net")) {
+              this.lidToPhone.set(lid, phone);
+            }
+          }
+        }
+      });
+
+      sock.ev.on("contacts.update", (contacts) => {
+        for (const c of contacts) {
+          if (c.lid && c.id && String(c.id).endsWith("@s.whatsapp.net")) {
+            const lid = this._stripDeviceSuffix(c.lid);
+            const phone = this._stripDeviceSuffix(c.id);
+            this.lidToPhone.set(lid, phone);
+          }
+        }
+      });
+
+      // Evento direto de LID→phone quando contato compartilha número
+      sock.ev.on("chats.phoneNumberShare", (data) => {
+        if (data && data.lid && data.jid) {
+          const lid = this._stripDeviceSuffix(data.lid);
+          const phone = this._stripDeviceSuffix(data.jid);
+          if (lid.endsWith("@lid") && phone.endsWith("@s.whatsapp.net")) {
+            this.lidToPhone.set(lid, phone);
+            console.log(`[${sessionId}] Phone shared: ${lid} -> ${phone}`);
+          }
+        }
+      });
+
+      sock.ev.on("messaging-history.set", ({ contacts }) => {
+        if (!contacts) return;
+        for (const c of contacts) {
+          if (c.lid && c.id && String(c.id).endsWith("@s.whatsapp.net")) {
+            this.lidToPhone.set(this._stripDeviceSuffix(c.lid), this._stripDeviceSuffix(c.id));
+          }
+          if (c.lid && c.jid) {
+            this.lidToPhone.set(this._stripDeviceSuffix(c.lid), this._stripDeviceSuffix(c.jid));
+          }
+        }
+        if (this.lidToPhone.size > 0) {
+          console.log(`[${sessionId}] LID map now has ${this.lidToPhone.size} entries`);
         }
       });
 
@@ -321,6 +469,15 @@ class SessionManager {
         sess.status = "open";
         sess.jid = jid;
         sess.name = name;
+      }
+      // Mapear nosso próprio LID → phone
+      if (sock.user?.lid) {
+        const ownLid = this._stripDeviceSuffix(sock.user.lid);
+        const ownPhone = this._stripDeviceSuffix(jid);
+        if (ownLid.endsWith("@lid") && ownPhone.endsWith("@s.whatsapp.net")) {
+          this.lidToPhone.set(ownLid, ownPhone);
+          console.log(`[${sessionId}] Own LID mapped: ${ownLid} -> ${ownPhone}`);
+        }
       }
       this._emitStatus(sessionId, "open");
       console.log(`[${sessionId}] Connected as ${name} (${jid})`);
@@ -384,7 +541,11 @@ class SessionManager {
     this.retryCount.delete(sessionId);
     this.messageStore.delete(sessionId);
     this.customNames.delete(sessionId);
-    await db.deleteSessionName(sessionId);
+    if (this.useFallback) {
+      this._saveDataToFile();
+    } else {
+      await db.deleteSessionName(sessionId);
+    }
     const sessionPath = path.join(SESSION_DIR, sessionId);
     fs.rmSync(sessionPath, { recursive: true, force: true });
     this._emitStatus(sessionId, "disconnected");
@@ -494,8 +655,11 @@ class SessionManager {
 
   // ── Mensagem Store (cache + Supabase) ──
   async _storeMessage(sessionId, msg) {
-    const chatJid = msg.key.remoteJid;
-    if (!chatJid) return null;
+    const rawJid = msg.key.remoteJid;
+    if (!rawJid) return null;
+    // Aprender LID mapping ANTES de resolver (para ter dados disponíveis)
+    this._learnLidMapping(msg);
+    const chatJid = this._resolveJid(rawJid);
     if (!this.messageStore.has(sessionId)) {
       this.messageStore.set(sessionId, new Map());
     }
@@ -534,9 +698,11 @@ class SessionManager {
     if (arr.length > 500) arr.shift();
 
     // Persistir no Supabase (fire-and-forget, não bloqueia)
-    db.saveMessage(formatted).catch(err => {
-      console.error(`[${sessionId}] DB save error:`, err.message);
-    });
+    if (!this.useFallback) {
+      db.saveMessage(formatted).catch(err => {
+        console.error(`[${sessionId}] DB save error:`, err.message);
+      });
+    }
 
     return formatted;
   }
@@ -579,52 +745,142 @@ class SessionManager {
       type = "sticker"; body = "[Sticker]";
     }
 
+    // 1. Aprender mapeamento LID→Phone com dados desta mensagem
+    this._learnLidMapping(msg);
+
+    // 2. Resolver chatJid: LID → phone, remover sufixo de dispositivo
+    const chatJid = this._resolveJid(msg.key.remoteJid);
+
+    // 3. Resolver participant (grupo): LID → phone
+    let participant = msg.key.participant || null;
+    if (participant) {
+      // Tentar usar participantPn diretamente (mais confiável)
+      if (msg.key.participantPn) {
+        participant = this._stripDeviceSuffix(msg.key.participantPn);
+      } else {
+        participant = this._resolveJid(participant);
+      }
+    }
+
     return {
       id: msg.key.id,
       sessionId,
-      chatJid: msg.key.remoteJid,
+      chatJid,
       fromMe: msg.key.fromMe || false,
       pushName: msg.pushName || "",
       type,
       body,
       mediaUrl,
       timestamp: (msg.messageTimestamp?.low || msg.messageTimestamp || Date.now() / 1000) * 1000,
+      isGroup: chatJid ? chatJid.endsWith("@g.us") : false,
+      participant,
     };
   }
 
-  // ── Chats (Supabase como fonte principal) ──
+  // ── Chats (Supabase como fonte principal, fallback para memória) ──
   async getChats() {
-    // Tentar buscar do Supabase
-    const dbChats = await db.getChats();
-    if (dbChats.length > 0) return dbChats;
+    let chatList = this.useFallback ? [] : await db.getChats();
 
     // Fallback: cache em memória
-    const chats = new Map();
-    for (const [sessionId, chatMap] of this.messageStore) {
-      for (const [jid, messages] of chatMap) {
-        const existing = chats.get(jid);
-        const lastMsg = messages[messages.length - 1];
-        if (!existing || lastMsg.timestamp > existing.lastTimestamp) {
-          chats.set(jid, {
-            jid,
-            lastMessage: lastMsg.body,
-            lastTimestamp: lastMsg.timestamp,
-            lastSessionId: sessionId,
-            pushName: lastMsg.pushName || jid.split("@")[0],
-            sessions: existing ? [...existing.sessions, sessionId] : [sessionId],
-          });
-        } else if (existing && !existing.sessions.includes(sessionId)) {
-          existing.sessions.push(sessionId);
+    if (chatList.length === 0) {
+      const chats = new Map();
+      for (const [sessionId, chatMap] of this.messageStore) {
+        for (const [jid, messages] of chatMap) {
+          const existing = chats.get(jid);
+          const lastMsg = messages[messages.length - 1];
+          if (!existing || lastMsg.timestamp > existing.lastTimestamp) {
+            chats.set(jid, {
+              jid,
+              lastMessage: lastMsg.body,
+              lastTimestamp: lastMsg.timestamp,
+              lastSessionId: sessionId,
+              pushName: lastMsg.pushName || jid.split("@")[0],
+              sessions: existing ? [...existing.sessions, sessionId] : [sessionId],
+            });
+          } else if (existing && !existing.sessions.includes(sessionId)) {
+            existing.sessions.push(sessionId);
+          }
+        }
+      }
+      chatList = Array.from(chats.values()).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+    }
+
+    // Resolver LIDs no chat list (mensagens antigas que podem ter LID como chat_jid)
+    for (const chat of chatList) {
+      if (chat.jid && String(chat.jid).endsWith("@lid")) {
+        const resolved = this.lidToPhone.get(this._stripDeviceSuffix(chat.jid));
+        if (resolved) {
+          chat.jid = resolved;
         }
       }
     }
-    return Array.from(chats.values()).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+
+    // Deduplicar chats que agora têm o mesmo JID (após resolução de LID)
+    const deduped = new Map();
+    for (const chat of chatList) {
+      const existing = deduped.get(chat.jid);
+      if (!existing || chat.lastTimestamp > existing.lastTimestamp) {
+        deduped.set(chat.jid, chat);
+      }
+    }
+    chatList = Array.from(deduped.values()).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+
+    // Enriquecer com isGroup e groupName
+    // Encontrar uma sessao conectada para buscar metadados de grupo
+    let connectedSessionId = null;
+    for (const [id, s] of this.sessions) {
+      if (s.status === "open") { connectedSessionId = id; break; }
+    }
+
+    const groupFetchPromises = [];
+    for (const chat of chatList) {
+      chat.isGroup = chat.jid ? chat.jid.endsWith("@g.us") : false;
+      if (chat.isGroup) {
+        const cached = this.groupMetadata.get(chat.jid);
+        if (cached) {
+          chat.groupName = cached.subject;
+        } else if (connectedSessionId) {
+          // Buscar nome do grupo de uma sessao conectada
+          groupFetchPromises.push(
+            this._getGroupName(connectedSessionId, chat.jid)
+              .then(name => { chat.groupName = name; })
+              .catch(() => { chat.groupName = chat.jid.split("@")[0]; })
+          );
+        } else {
+          chat.groupName = chat.jid.split("@")[0];
+        }
+      }
+    }
+
+    // Aguardar busca dos nomes dos grupos (maximo 5 segundos)
+    if (groupFetchPromises.length > 0) {
+      await Promise.race([
+        Promise.all(groupFetchPromises),
+        new Promise(resolve => setTimeout(resolve, 5000)),
+      ]);
+    }
+
+    return chatList;
   }
 
   async getChatMessages(jid) {
-    // Buscar do Supabase (todas as mensagens persistidas)
-    const dbMessages = await db.getMessages(jid);
-    if (dbMessages.length > 0) return dbMessages;
+    // Tentar com o JID fornecido e também com possível LID reverso
+    if (!this.useFallback) {
+      let dbMessages = await db.getMessages(jid);
+      // Se não encontrou mensagens, tentar buscar com LID (caso mensagens antigas estejam salvas com LID)
+      if (dbMessages.length === 0 && jid.endsWith("@s.whatsapp.net")) {
+        for (const [lid, phone] of this.lidToPhone) {
+          if (phone === jid) {
+            const lidMessages = await db.getMessages(lid);
+            if (lidMessages.length > 0) {
+              dbMessages = lidMessages;
+              break;
+            }
+          }
+        }
+      }
+      if (dbMessages.length > 0) return dbMessages;
+    }
 
     // Fallback: cache em memória
     const all = [];
@@ -635,12 +891,106 @@ class SessionManager {
     return all.sort((a, b) => a.timestamp - b.timestamp);
   }
 
-  _formatJid(number) {
-    let clean = String(number).replace(/\D/g, "");
-    if (!clean.includes("@")) {
-      clean = clean + "@s.whatsapp.net";
+  async clearChat(jid) {
+    if (!this.useFallback) {
+      await db.deleteMessages(jid);
+    }
+    for (const [sessionId, chatMap] of this.messageStore) {
+      chatMap.delete(jid);
+    }
+    return { success: true };
+  }
+
+  // Normaliza JID: remove sufixo de dispositivo E resolve LID→phone
+  _normalizeJid(jid) {
+    return this._resolveJid(jid);
+  }
+
+  // Aprende mapeamento LID→Phone a partir de dados da mensagem
+  _learnLidMapping(msg) {
+    const key = msg.key || {};
+    // participantPn: telefone real quando participant é LID (mensagens de grupo)
+    if (key.participant && key.participantPn) {
+      const lid = this._stripDeviceSuffix(key.participant);
+      const phone = this._stripDeviceSuffix(key.participantPn);
+      if (lid.endsWith("@lid") && phone.endsWith("@s.whatsapp.net")) {
+        this.lidToPhone.set(lid, phone);
+      }
+    }
+    // participantLid + participantPn (quando participant já é phone)
+    if (key.participantLid && key.participantPn) {
+      const lid = this._stripDeviceSuffix(key.participantLid);
+      const phone = this._stripDeviceSuffix(key.participantPn);
+      if (lid.endsWith("@lid") && phone.endsWith("@s.whatsapp.net")) {
+        this.lidToPhone.set(lid, phone);
+      }
+    }
+    // senderLid + senderPn (mensagens 1:1)
+    if (key.senderLid && key.senderPn) {
+      const lid = this._stripDeviceSuffix(key.senderLid);
+      const phone = this._stripDeviceSuffix(key.senderPn);
+      if (lid.endsWith("@lid") && phone.endsWith("@s.whatsapp.net")) {
+        this.lidToPhone.set(lid, phone);
+      }
+    }
+    // remoteJid é LID e senderPn disponível (chat 1:1 com LID)
+    if (key.remoteJid && String(key.remoteJid).endsWith("@lid") && key.senderPn) {
+      const lid = this._stripDeviceSuffix(key.remoteJid);
+      const phone = this._stripDeviceSuffix(key.senderPn);
+      if (phone.endsWith("@s.whatsapp.net")) {
+        this.lidToPhone.set(lid, phone);
+      }
+    }
+  }
+
+  // Remove sufixo de dispositivo sem resolver LID
+  _stripDeviceSuffix(jid) {
+    if (!jid) return "";
+    const str = String(jid);
+    if (str.endsWith("@g.us")) return str;
+    return str.replace(/:\d+@/, "@");
+  }
+
+  // Resolve um JID: remove sufixo de dispositivo E resolve LID→phone se possível
+  _resolveJid(jid) {
+    if (!jid) return jid;
+    const str = String(jid);
+    if (str.endsWith("@g.us")) return str;
+    const clean = str.replace(/:\d+@/, "@");
+    if (clean.endsWith("@lid")) {
+      const resolved = this.lidToPhone.get(clean);
+      return resolved || clean; // retorna LID se não resolvido (será tratado no frontend)
     }
     return clean;
+  }
+
+  _formatJid(jid) {
+    const str = String(jid);
+    if (str.includes("@")) return this._resolveJid(str);
+    return str.replace(/\D/g, "") + "@s.whatsapp.net";
+  }
+
+  async _getGroupName(sessionId, groupJid) {
+    // Retornar do cache se disponível
+    if (this.groupMetadata.has(groupJid)) {
+      return this.groupMetadata.get(groupJid).subject;
+    }
+    // Buscar do Baileys
+    const sess = this.sessions.get(sessionId);
+    if (!sess || !sess.sock || sess.status !== "open") {
+      return groupJid.split("@")[0];
+    }
+    try {
+      const metadata = await sess.sock.groupMetadata(groupJid);
+      this.groupMetadata.set(groupJid, {
+        subject: metadata.subject || groupJid.split("@")[0],
+        participants: (metadata.participants || []).length,
+      });
+      return metadata.subject || groupJid.split("@")[0];
+    } catch (err) {
+      console.error(`[${sessionId}] Group metadata error for ${groupJid}:`, err.message);
+      return groupJid.split("@")[0];
+    }
   }
 }
 

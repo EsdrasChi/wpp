@@ -55,6 +55,13 @@ module.exports = function setupSocketHandler(io, sessionManager) {
       socket.emit("chats:list", refreshedChats);
     });
 
+    socket.on("chat:clear", async (data) => {
+      const result = await sessionManager.clearChat(data.jid);
+      if (result.success) {
+        io.emit("chat:cleared", { jid: data.jid });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`[WS] Client disconnected: ${socket.id}`);
     });

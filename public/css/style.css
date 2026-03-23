@@ -1,97 +1,265 @@
+/* ══════════════════════════════════════════════
+   WPP OUTBOUND — WhatsApp Web Light Mode Theme
+   ══════════════════════════════════════════════ */
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+::-webkit-scrollbar-thumb { background: rgba(17,27,33,0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(17,27,33,0.35); }
 
-/* ── Transitions ── */
-.nav-btn.active { background: rgba(255,255,255,0.06); color: #fff; }
+/* ── No scrollbar utility ── */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* ── Chat items ── */
+/* ── Nav Rail ── */
+.nav-btn { transition: background 0.15s; position: relative; }
+.nav-btn.active { background: #e9edef; }
+.nav-btn.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  background: #00a884;
+  border-radius: 0 3px 3px 0;
+}
+
+/* ── Chat items — WhatsApp Web light ── */
 .chat-item { transition: background 0.15s; }
-.chat-item:hover { background: rgba(255,255,255,0.04); }
-.chat-item.active { background: rgba(99,102,241,0.12); border-right: 2px solid #6366f1; }
+.chat-item:hover { background: #f5f6f6; }
+.chat-item.active { background: #f0f2f5; }
 
-/* ── Message bubbles ── */
+/* ── Message bubbles — WhatsApp Web Light Mode ── */
 .msg-bubble {
-  max-width: 70%;
+  max-width: 65%;
   word-break: break-word;
+  position: relative;
+  padding: 6px 7px 8px 9px;
+  box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);
 }
 .msg-incoming {
-  background: rgba(255,255,255,0.06);
-  border-radius: 4px 16px 16px 16px;
+  background: #ffffff;
+  border-radius: 0 8px 8px 8px;
+}
+.msg-incoming::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -8px;
+  width: 0;
+  height: 0;
+  border-top: 0 solid transparent;
+  border-right: 8px solid #ffffff;
+  border-bottom: 8px solid transparent;
 }
 .msg-outgoing {
-  background: rgba(99,102,241,0.2);
-  border-radius: 16px 4px 16px 16px;
+  background: #d9fdd3;
+  border-radius: 8px 0 8px 8px;
   margin-left: auto;
 }
+.msg-outgoing::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 0;
+  height: 0;
+  border-top: 0 solid transparent;
+  border-left: 8px solid #d9fdd3;
+  border-bottom: 8px solid transparent;
+}
 
-/* ── Instance badge ── */
+/* ── Chat background — WhatsApp Web beige doodle ── */
+.wpp-chat-bg {
+  background-color: #efeae2;
+  background-image: url("data:image/svg+xml,%3Csvg width='412' height='412' viewBox='0 0 412 412' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23c8c3ba' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* ── Message time — light mode ── */
+.msg-time {
+  font-size: 11px;
+  color: #667781;
+  margin-left: 8px;
+  white-space: nowrap;
+  float: right;
+  margin-top: 4px;
+}
+.msg-checks {
+  color: #53bdeb;
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+/* ── Instance badges ── */
 .inst-badge { font-size: 9px; padding: 1px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px; }
-.inst-badge-1 { background: rgba(34,211,238,0.15); color: #22d3ee; }
-.inst-badge-2 { background: rgba(167,139,250,0.15); color: #a78bfa; }
-.inst-badge-3 { background: rgba(52,211,153,0.15); color: #34d399; }
-.inst-badge-4 { background: rgba(251,146,60,0.15); color: #fb923c; }
-.inst-badge-5 { background: rgba(244,114,182,0.15); color: #f472b6; }
+.inst-badge-1 { background: rgba(0,168,132,0.12); color: #00a884; }
+.inst-badge-2 { background: rgba(124,58,237,0.12); color: #7c3aed; }
+.inst-badge-3 { background: rgba(5,150,105,0.12); color: #059669; }
+.inst-badge-4 { background: rgba(234,88,12,0.12); color: #ea580c; }
+.inst-badge-5 { background: rgba(219,39,119,0.12); color: #db2777; }
 
 /* ── Status dot ── */
 .status-dot { width: 8px; height: 8px; border-radius: 50%; }
-.status-open { background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,0.5); }
+.status-open { background: #00a884; box-shadow: 0 0 6px rgba(0,168,132,0.5); }
 .status-connecting, .status-qr, .status-reconnecting { background: #fbbf24; animation: pulse-dot 1.5s infinite; }
-.status-disconnected, .status-error { background: #6b7280; }
+.status-disconnected, .status-error { background: #9ca3af; }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
 
-/* ── Audio player ── */
-.audio-player {
-  display: flex; align-items: center; gap: 8px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 20px; padding: 6px 12px;
+/* ── Date separator ── */
+.date-separator {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
 }
-.audio-player button {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: #6366f1; border: none; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-}
-.audio-player input[type=range] {
-  flex: 1; height: 3px; accent-color: #6366f1;
+.date-separator span {
+  background: #ffffff;
+  color: #54656f;
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 7.5px;
+  box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);
+  text-transform: uppercase;
 }
 
-/* ── Contact card ── */
+/* ── Audio player — WhatsApp green native ── */
+.audio-player {
+  display: flex; align-items: center; gap: 8px;
+  background: transparent;
+  border-radius: 20px; padding: 6px 0;
+  min-width: 240px;
+}
+.audio-player button {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #00a884; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.audio-player button:hover { background: #008f72; }
+.audio-player input[type=range] {
+  flex: 1; height: 4px; accent-color: #00a884;
+  -webkit-appearance: none; appearance: none;
+  background: #c6ded3;
+  border-radius: 2px;
+  outline: none;
+}
+.audio-player input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #00a884; cursor: pointer;
+}
+
+/* ── Filter pills ── */
+.chat-filter-btn {
+  transition: all 0.15s;
+  border: none;
+  cursor: pointer;
+}
+.chat-filter-btn.active-filter {
+  background: #00a884 !important;
+  color: #ffffff !important;
+}
+
+/* ── WhatsApp-style input area — light mode ── */
+.wpp-input-area {
+  background: #f0f2f5;
+  padding: 8px 16px;
+}
+.wpp-input {
+  flex: 1;
+  background: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #111b21;
+  font-size: 15px;
+  outline: none;
+}
+.wpp-input::placeholder { color: #667781; }
+
+.wpp-icon-btn {
+  background: none; border: none;
+  color: #54656f; cursor: pointer;
+  padding: 6px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.wpp-icon-btn:hover { color: #111b21; background: rgba(17,27,33,0.04); }
+
+.wpp-send-btn {
+  background: none; border: none;
+  color: #00a884; cursor: pointer;
+  padding: 6px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s;
+}
+.wpp-send-btn:hover { color: #008f72; }
+
+.wpp-icon-btn.recording-active {
+  color: #ef4444;
+  background: rgba(239,68,68,0.08);
+}
+
+/* ── Contact card — light ── */
 .contact-card {
   transition: border-color 0.2s, transform 0.15s;
   cursor: pointer;
+  background: #ffffff;
+  border: 1px solid #e9edef;
 }
 .contact-card:hover {
-  border-color: rgba(99,102,241,0.3);
+  border-color: rgba(0,168,132,0.3);
   transform: translateY(-1px);
 }
 
-/* ── Instance picker button ── */
-.picker-btn {
-  transition: all 0.15s;
-}
-.picker-btn:hover {
-  transform: scale(1.01);
-}
+/* ── Instance picker ── */
+.picker-btn { transition: all 0.15s; }
+.picker-btn:hover { transform: scale(1.01); }
 
 /* ── Contact tab active ── */
 .contact-tab.active-tab {
-  background: rgba(99,102,241,0.15);
-  color: #818cf8;
+  background: rgba(0,168,132,0.1);
+  color: #00a884;
 }
 
-/* ── Kanban Board ── */
+/* ── Chat header dropdown — light ── */
+.chat-header-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e9edef;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  min-width: 200px;
+  z-index: 40;
+  overflow: hidden;
+}
+.chat-header-menu button {
+  width: 100%;
+  text-align: left;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: #111b21;
+  transition: background 0.15s;
+}
+.chat-header-menu button:hover { background: #f5f6f6; }
+.chat-header-menu .danger { color: #ef4444; }
+.chat-header-menu .danger:hover { background: rgba(239,68,68,0.06); }
+
+/* ── Kanban Board — light ── */
 .kanban-column {
   min-width: 260px;
   max-width: 300px;
   flex-shrink: 0;
-  background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.05);
+  background: #f0f2f5;
+  border: 1px solid #e9edef;
   border-radius: 12px;
   display: flex;
   flex-direction: column;
@@ -99,7 +267,7 @@
 }
 .kanban-column-header {
   padding: 12px 14px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid #e9edef;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -110,8 +278,8 @@
   padding: 10px;
 }
 .kanban-card {
-  background: rgba(17,17,27,0.8);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: #ffffff;
+  border: 1px solid #e9edef;
   border-radius: 10px;
   padding: 12px;
   margin-bottom: 8px;
@@ -119,17 +287,26 @@
   transition: all 0.2s;
 }
 .kanban-card:hover {
-  border-color: rgba(99,102,241,0.4);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  border-color: rgba(0,168,132,0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
 
 /* ── Stage badges ── */
 .stage-badge { font-size: 9px; padding: 3px 8px; border-radius: 6px; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase; }
-.stage-novo { background: rgba(148,163,184,0.2); color: #94a3b8; }
-.stage-tentativa { background: rgba(251,191,36,0.2); color: #fbbf24; }
-.stage-conectado { background: rgba(34,197,94,0.2); color: #22c55e; }
-.stage-agendada { background: rgba(59,130,246,0.2); color: #3b82f6; }
-.stage-realizada { background: rgba(139,92,246,0.2); color: #8b5cf6; }
-.stage-noshow { background: rgba(239,68,68,0.2); color: #ef4444; }
-.stage-perdido { background: rgba(107,114,128,0.2); color: #6b7280; }
+.stage-novo { background: rgba(148,163,184,0.15); color: #64748b; }
+.stage-tentativa { background: rgba(251,191,36,0.15); color: #d97706; }
+.stage-conectado { background: rgba(34,197,94,0.15); color: #16a34a; }
+.stage-secretario { background: rgba(249,115,22,0.15); color: #ea580c; }
+.stage-agendada { background: rgba(59,130,246,0.15); color: #2563eb; }
+.stage-realizada { background: rgba(139,92,246,0.15); color: #7c3aed; }
+.stage-noshow { background: rgba(239,68,68,0.15); color: #dc2626; }
+.stage-perdido { background: rgba(107,114,128,0.15); color: #6b7280; }
+
+/* ── Attach menu — light ── */
+#attach-menu {
+  background: #ffffff;
+  border: 1px solid #e9edef;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+}
