@@ -16,6 +16,7 @@ let kanbanData = {};
 let selectedKanbanCard = null;
 let chatFilter = "all"; // "all" | "unread" | "favorites" | "group"
 let groupNames = {}; // cache: groupJid -> groupName
+let groupInfoCache = {}; // cache: groupJid -> { announce, isAdmin, participants, ... }
 let disconnectedSessions = new Set();
 let lastRenderedDate = null;
 
@@ -40,6 +41,20 @@ function cleanNumber(jidOrNum) {
   if (str.endsWith("@lid")) return "";
   const raw = str.split("@")[0];
   return raw.split(":")[0];
+}
+
+// Para um JID @lid, tenta encontrar o numero real buscando um chat @s.whatsapp.net com mesmo pushName
+function resolveNumberForLid(lidJid) {
+  if (!isLidJid(lidJid)) return cleanNumber(lidJid);
+  const lidChat = chats.find(c => c.jid === lidJid);
+  if (!lidChat || !lidChat.pushName) return "";
+  const match = chats.find(c =>
+    c.jid !== lidJid &&
+    !isLidJid(c.jid) &&
+    !c.jid.endsWith("@g.us") &&
+    c.pushName === lidChat.pushName
+  );
+  return match ? cleanNumber(match.jid) : "";
 }
 
 const KANBAN_STAGES = [
@@ -83,6 +98,10 @@ function switchView(view) {
     document.getElementById("left-panel").classList.remove("hidden");
     document.getElementById("no-chat-selected").classList.toggle("hidden", !!currentChatJid);
     document.getElementById("active-chat").classList.toggle("hidden", !currentChatJid);
+    // Garantir que input esteja visível quando chat ativo existe
+    if (currentChatJid) {
+      document.getElementById("chat-input-area").classList.remove("hidden");
+    }
   } else {
     // Show left panel + admin view in right panel, hide chat
     document.getElementById("left-panel").classList.remove("hidden");
@@ -166,6 +185,9 @@ socket.on("chat:messages", (data) => {
     // Filtrar mensagens de sessoes desconectadas
     const filtered = data.messages.filter(m => !isSessionDisconnected(m.sessionId));
     renderMessages(filtered);
+    // Garantir que input permanece visível após renderização
+    document.getElementById("chat-input-area")?.classList.remove("hidden");
+    document.getElementById("active-chat")?.classList.remove("hidden");
   }
 });
 
@@ -181,6 +203,7 @@ socket.on("chat:cleared", (data) => {
   if (currentChatJid === data.jid) {
     currentChatJid = null;
     document.getElementById("active-chat").classList.add("hidden");
+    document.getElementById("chat-input-area").classList.add("hidden");
     document.getElementById("no-chat-selected").classList.remove("hidden");
   }
 });
@@ -191,6 +214,34 @@ socket.on("kanban:stage-changed", (data) => {
   if (contact) {
     contact.stage = data.stage;
   }
+});
+
+socket.on("group:info", (data) => {
+  if (!data || !data.jid) return;
+  groupInfoCache[data.jid] = data;
+  if (currentChatJid === data.jid) {
+    applyGroupInfoToChat(data);
+  }
+  // Atualizar modal se aberto para este grupo
+  const modal = document.getElementById("group-info-modal");
+  if (modal && !modal.classList.contains("hidden")) {
+    const nameEl = document.getElementById("group-info-name");
+    if (nameEl && data.subject && nameEl.textContent !== data.subject) {
+      populateGroupInfoModal(data);
+    } else if (data.participants && data.participants.length > 0) {
+      populateGroupInfoModal(data);
+    }
+  }
+});
+
+socket.on("group:updated", (data) => {
+  if (!data || !data.jid) return;
+  groupInfoCache[data.jid] = data;
+  if (data.subject) groupNames[data.jid] = data.subject;
+  if (currentChatJid === data.jid) {
+    applyGroupInfoToChat(data);
+  }
+  renderChatList();
 });
 
 // ─── Chat List Local Update ─────────────
@@ -264,6 +315,7 @@ function deleteChat(jid) {
 function closeCurrentChat() {
   currentChatJid = null;
   document.getElementById("active-chat").classList.add("hidden");
+  document.getElementById("chat-input-area").classList.add("hidden");
   document.getElementById("no-chat-selected").classList.remove("hidden");
   renderChatList();
   closeChatMenu();
@@ -419,7 +471,19 @@ function renderChatList() {
   const el = document.getElementById("chat-list");
   const search = document.getElementById("chat-search").value.toLowerCase();
 
+  // Deduplicar: coletar pushNames que já possuem chat @s.whatsapp.net
+  const phoneNameSet = new Set();
+  for (const c of chats) {
+    if (c.jid && !isLidJid(c.jid) && !c.jid.endsWith("@g.us") && c.pushName) {
+      phoneNameSet.add(c.pushName);
+    }
+  }
+
   const filtered = chats.filter((c) => {
+    // Ignorar chats com JID inválido
+    if (!c.jid || c.jid === "undefined" || c.jid === "null") return false;
+    // Bug 1: ocultar @lid quando já existe @s.whatsapp.net com mesmo pushName
+    if (isLidJid(c.jid) && c.pushName && phoneNameSet.has(c.pushName)) return false;
     // Ocultar chats de sessoes desconectadas
     if (c.lastSessionId && isSessionDisconnected(c.lastSessionId)) return false;
     const isGroup = c.isGroup || (c.jid && c.jid.endsWith("@g.us"));
@@ -533,14 +597,19 @@ function findContactName(jid) {
 
 // ─── Open Chat ──────────────────────────
 function openChat(jid) {
-  if (!jid) return;
+  if (!jid || jid === "undefined" || jid === "null") return;
 
   // SEMPRE mostrar area de chat primeiro (antes de qualquer operacao que possa falhar)
-  document.getElementById("no-chat-selected")?.classList.add("hidden");
-  document.getElementById("active-chat")?.classList.remove("hidden");
+  const noChatEl = document.getElementById("no-chat-selected");
+  const activeChatEl = document.getElementById("active-chat");
+  const inputAreaEl = document.getElementById("chat-input-area");
+  const messagesEl = document.getElementById("chat-messages");
+
+  if (noChatEl) noChatEl.classList.add("hidden");
+  if (activeChatEl) activeChatEl.classList.remove("hidden");
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
-  document.getElementById("chat-input-area").classList.remove("hidden");
-  document.getElementById("chat-messages").innerHTML = '<div class="text-center text-[#667781] text-sm py-8">Carregando...</div>';
+  if (inputAreaEl) inputAreaEl.classList.remove("hidden");
+  if (messagesEl) messagesEl.innerHTML = '<div class="text-center text-[#667781] text-sm py-8">Carregando...</div>';
 
   const previousJid = currentChatJid;
   currentChatJid = jid;
@@ -558,24 +627,42 @@ function openChat(jid) {
     const name = findContactName(jid);
     const num = cleanNumber(jid);
 
+    // Remover banner admin-only anterior (ao trocar de chat — funciona para grupo e contato)
+    const oldBanner = document.getElementById("admin-only-banner");
+    if (oldBanner) oldBanner.remove();
+
     let avatarHtml, subtitleHtml, stageHtml;
 
     if (isGroup) {
-      avatarHtml = `<div class="w-10 h-10 rounded-full bg-[#00a884]/10 flex items-center justify-center text-[#00a884]">
+      avatarHtml = `<div class="w-10 h-10 rounded-full bg-[#00a884]/10 flex items-center justify-center text-[#00a884] cursor-pointer" onclick="openGroupInfoModal('${jid}')">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
       </div>`;
-      subtitleHtml = `<span class="text-[11px] bg-[#e9edef] text-[#667781] px-1.5 py-0.5 rounded">Grupo</span>`;
+      const cachedInfo = groupInfoCache[jid];
+      const memberCount = cachedInfo ? cachedInfo.size : "";
+      const memberText = memberCount ? `${memberCount} participantes` : "Grupo";
+      subtitleHtml = `<span id="group-subtitle" class="text-[11px] text-[#667781] cursor-pointer hover:underline" onclick="openGroupInfoModal('${jid}')">${memberText}</span>`;
       stageHtml = "";
+      // Solicitar info do grupo (non-blocking)
+      socket.emit("group:info", { jid });
     } else {
       const AVATAR_COLORS = ["#00a884","#53bdeb","#7c3aed","#ea580c","#db2777","#f59e0b","#059669"];
       const colorIdx = Math.abs(jid.split("").reduce((a,c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
       const avatarColor = AVATAR_COLORS[colorIdx];
       const initial = (name || "?").charAt(0).toUpperCase();
       avatarHtml = `<div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold text-white" style="background:${avatarColor}">${initial}</div>`;
-      subtitleHtml = num
-        ? `<span class="text-[11px] text-[#667781] font-mono">${num}</span>`
+      // Bug 2: Para LID, resolver numero real via pushName match ou exibir pushName
+      let displayNum = num;
+      if (!displayNum && isLidJid(jid)) {
+        displayNum = resolveNumberForLid(jid);
+        if (!displayNum) {
+          const lidChat = chats.find(c => c.jid === jid);
+          displayNum = (lidChat && lidChat.pushName) ? lidChat.pushName : "";
+        }
+      }
+      subtitleHtml = displayNum
+        ? `<span class="text-[11px] text-[#667781] font-mono">${escapeHtml(displayNum)}</span>`
         : `<span class="text-[11px] text-[#667781]">Contato</span>`;
-      const contact = num ? leads.find(l => l.numero === num) : null;
+      const contact = (num || displayNum) ? leads.find(l => l.numero === (num || displayNum)) : null;
       const currentStage = contact ? (contact.stage || 'novo') : 'novo';
       stageHtml = `
         <select onchange="updateChatStage('${num}', this.value)"
@@ -596,10 +683,13 @@ function openChat(jid) {
           <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
         </button>
         <div id="chat-dropdown-menu" class="chat-header-menu hidden">
-          ${!isGroup ? `<button onclick="updateChatStage('${num}', document.querySelector('#chat-header select')?.value || 'novo')">
+          ${isGroup ? `<button onclick="openGroupInfoModal('${jid}'); closeChatMenu();">
+            <svg class="w-4 h-4 inline mr-2 opacity-60" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            Info do grupo
+          </button>` : `<button onclick="updateChatStage('${num}', document.querySelector('#chat-header select')?.value || 'novo')">
             <svg class="w-4 h-4 inline mr-2 opacity-60" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
             Salvar etapa
-          </button>` : ''}
+          </button>`}
           <button onclick="closeCurrentChat()">
             <svg class="w-4 h-4 inline mr-2 opacity-60" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
             Fechar chat
@@ -1432,7 +1522,17 @@ async function startRecording() {
     recordingStream = stream;
     recordingCancelled = false;
     audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+    // Prefer OGG/Opus (native WhatsApp format), fallback to WebM/Opus
+    const preferredTypes = [
+      "audio/ogg;codecs=opus",
+      "audio/webm;codecs=opus",
+      "audio/webm",
+    ];
+    let chosenMime = "";
+    for (const t of preferredTypes) {
+      if (MediaRecorder.isTypeSupported(t)) { chosenMime = t; break; }
+    }
+    mediaRecorder = new MediaRecorder(stream, chosenMime ? { mimeType: chosenMime } : {});
 
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunks.push(e.data);
@@ -1447,10 +1547,12 @@ async function startRecording() {
         return;
       }
 
-      const blob = new Blob(audioChunks, { type: "audio/webm" });
+      const actualMime = mediaRecorder.mimeType || "audio/webm";
+      const ext = actualMime.includes("ogg") ? "ogg" : actualMime.includes("mp4") ? "mp4" : "webm";
+      const blob = new Blob(audioChunks, { type: actualMime });
       if (blob.size < 1000) return;
 
-      const file = new File([blob], `audio-${Date.now()}.webm`, { type: "audio/webm" });
+      const file = new File([blob], `audio-${Date.now()}.${ext}`, { type: actualMime });
       await handleFileSend("audio", file);
     };
 
@@ -1786,6 +1888,139 @@ async function updateChatStage(numero, newStage) {
   } catch (err) {
     console.error("Failed to update stage:", err);
   }
+}
+
+// ─── Group Info ─────────────────────────
+function applyGroupInfoToChat(info) {
+  if (!info || info.jid !== currentChatJid) return;
+
+  // Atualizar subtitle com contagem de participantes
+  const subtitleEl = document.getElementById("group-subtitle");
+  if (subtitleEl && info.size) {
+    subtitleEl.textContent = `${info.size} participantes`;
+  }
+
+  // Remover banner admin-only anterior
+  const existingBanner = document.getElementById("admin-only-banner");
+  if (existingBanner) existingBanner.remove();
+
+  const inputArea = document.getElementById("chat-input-area");
+
+  if (info.announce && !info.isAdmin) {
+    // Grupo admin-only e usuario NAO eh admin — esconder input, mostrar banner
+    if (inputArea) inputArea.classList.add("hidden");
+
+    const banner = document.createElement("div");
+    banner.id = "admin-only-banner";
+    banner.className = "flex items-center justify-center gap-2 py-3 px-4 bg-[#fef3c7] border-t border-[#fbbf24]/30";
+    banner.innerHTML = `
+      <svg class="w-4 h-4 text-[#d97706] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+      </svg>
+      <span class="text-sm text-[#92400e]">Somente admins podem enviar mensagens</span>
+    `;
+    const activeChat = document.getElementById("active-chat");
+    if (activeChat) activeChat.appendChild(banner);
+  } else {
+    // Grupo normal ou usuario eh admin — mostrar input
+    if (inputArea) inputArea.classList.remove("hidden");
+  }
+}
+
+function openGroupInfoModal(groupJid) {
+  const info = groupInfoCache[groupJid];
+  const modal = document.getElementById("group-info-modal");
+
+  if (!info || !info.participants || info.participants.length === 0) {
+    // Mostrar loading e solicitar dados
+    const name = groupNames[groupJid] || "Grupo";
+    document.getElementById("group-info-name").textContent = name;
+    document.getElementById("group-info-meta").textContent = "Carregando...";
+    document.getElementById("group-info-count").textContent = "...";
+    document.getElementById("group-info-participants").innerHTML =
+      '<div class="p-6 text-center text-sm text-[#667781]">Carregando participantes...</div>';
+    document.getElementById("group-info-desc-section").classList.add("hidden");
+    document.getElementById("group-info-announce-section").classList.add("hidden");
+    modal.classList.remove("hidden");
+    socket.emit("group:info", { jid: groupJid });
+    return;
+  }
+
+  populateGroupInfoModal(info);
+  modal.classList.remove("hidden");
+}
+
+function populateGroupInfoModal(info) {
+  const name = info.subject || groupNames[info.jid] || "Grupo";
+  document.getElementById("group-info-name").textContent = name;
+  document.getElementById("group-info-meta").textContent = `Grupo \u2022 ${info.size || info.participants.length} participantes`;
+  document.getElementById("group-info-count").textContent = info.size || info.participants.length;
+
+  const descSection = document.getElementById("group-info-desc-section");
+  if (info.desc) {
+    document.getElementById("group-info-desc").textContent = info.desc;
+    descSection.classList.remove("hidden");
+  } else {
+    descSection.classList.add("hidden");
+  }
+
+  const announceSection = document.getElementById("group-info-announce-section");
+  if (info.announce) {
+    announceSection.classList.remove("hidden");
+  } else {
+    announceSection.classList.add("hidden");
+  }
+
+  renderGroupParticipants(info.participants);
+}
+
+function renderGroupParticipants(participants) {
+  const container = document.getElementById("group-info-participants");
+  if (!participants || participants.length === 0) {
+    container.innerHTML = '<div class="p-6 text-center text-sm text-[#667781]">Nenhum participante</div>';
+    return;
+  }
+
+  const sorted = [...participants].sort((a, b) => {
+    const order = { superadmin: 0, admin: 1 };
+    return (order[a.admin] ?? 2) - (order[b.admin] ?? 2);
+  });
+
+  const AVATAR_COLORS = ["#00a884","#53bdeb","#7c3aed","#ea580c","#db2777","#f59e0b","#059669"];
+
+  container.innerHTML = sorted.map(p => {
+    const displayName = p.pushName || (p.phone ? p.phone : (isLidJid(p.jid) ? "Participante" : cleanNumber(p.jid))) || "Participante";
+    const phoneDisplay = p.phone || "";
+    const initial = displayName.charAt(0).toUpperCase();
+    const colorIdx = Math.abs((p.jid || "").split("").reduce((a,c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
+    const avatarColor = AVATAR_COLORS[colorIdx];
+
+    let roleBadge = "";
+    if (p.admin === "superadmin") {
+      roleBadge = '<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded" style="background:rgba(0,168,132,0.12);color:#00a884;">Admin</span>';
+    } else if (p.admin === "admin") {
+      roleBadge = '<span class="text-[9px] font-semibold px-1.5 py-0.5 rounded" style="background:rgba(59,130,246,0.12);color:#3b82f6;">Admin</span>';
+    }
+
+    return `
+      <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#f5f6f6] transition-colors">
+        <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold text-white shrink-0" style="background:${avatarColor}">
+          ${initial}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-[#111b21] truncate">${escapeHtml(displayName)}</span>
+            ${roleBadge}
+          </div>
+          ${phoneDisplay ? `<span class="text-[11px] text-[#667781] font-mono">${escapeHtml(phoneDisplay)}</span>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function closeGroupInfoModal() {
+  document.getElementById("group-info-modal").classList.add("hidden");
 }
 
 // ─── Init ───────────────────────────────

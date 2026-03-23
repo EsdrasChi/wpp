@@ -303,6 +303,26 @@
 .stage-noshow { background: rgba(239,68,68,0.15); color: #dc2626; }
 .stage-perdido { background: rgba(107,114,128,0.15); color: #6b7280; }
 
+/* ── Group info modal — participant list scrollbar ── */
+#group-info-participants::-webkit-scrollbar { width: 5px; }
+#group-info-participants::-webkit-scrollbar-track { background: transparent; }
+#group-info-participants::-webkit-scrollbar-thumb { background: rgba(17,27,33,0.15); border-radius: 3px; }
+#group-info-participants::-webkit-scrollbar-thumb:hover { background: rgba(17,27,33,0.3); }
+
+/* ── Admin-only banner fadeIn ── */
+@keyframes fadeInBanner {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+#admin-only-banner {
+  animation: fadeInBanner 0.25s ease-out;
+}
+
+/* ── Group info modal overlay transition ── */
+#group-info-modal {
+  transition: opacity 0.2s ease;
+}
+
 /* ── Attach menu — light ── */
 #attach-menu {
   background: #ffffff;

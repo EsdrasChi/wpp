@@ -62,6 +62,21 @@ module.exports = function setupSocketHandler(io, sessionManager) {
       }
     });
 
+    socket.on("group:info", async (data) => {
+      if (!data || !data.jid || !String(data.jid).endsWith("@g.us")) return;
+      try {
+        const info = await sessionManager.getGroupInfo(data.jid);
+        socket.emit("group:info", info || {
+          jid: data.jid, announce: false, isAdmin: false, participants: [],
+        });
+      } catch (err) {
+        console.error("[WS] group:info error:", err.message);
+        socket.emit("group:info", {
+          jid: data.jid, announce: false, isAdmin: false, participants: [],
+        });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`[WS] Client disconnected: ${socket.id}`);
     });

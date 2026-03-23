@@ -10,6 +10,8 @@ const pino = require("pino");
 const path = require("path");
 const fs = require("fs");
 const QRCode = require("qrcode");
+const { execFile } = require("child_process");
+const ffmpegPath = require("ffmpeg-static");
 const db = require("./database");
 
 const SESSION_DIR = path.resolve(process.env.SESSION_DIR || "./sessions");
@@ -434,6 +436,33 @@ class SessionManager {
         }
       });
 
+      // ── Eventos de grupo ──
+      sock.ev.on("groups.update", (updates) => {
+        for (const update of updates) {
+          const groupJid = update.id;
+          if (!groupJid) continue;
+          const cached = this.groupMetadata.get(groupJid);
+          if (cached) {
+            if (update.subject !== undefined) cached.subject = update.subject;
+            if (update.desc !== undefined) cached.desc = update.desc;
+            if (update.announce !== undefined) cached.announce = !!update.announce;
+            if (update.restrict !== undefined) cached.restrict = !!update.restrict;
+            cached.fetchedAt = Date.now();
+            this.groupMetadata.set(groupJid, cached);
+          }
+          const info = this._buildGroupInfoPayload(groupJid);
+          if (info) this.io.emit("group:updated", info);
+        }
+      });
+
+      sock.ev.on("group-participants.update", async (event) => {
+        const { id: groupJid } = event;
+        if (!groupJid) return;
+        await this._fetchAndCacheGroupMetadata(sessionId, groupJid, true);
+        const info = this._buildGroupInfoPayload(groupJid);
+        if (info) this.io.emit("group:updated", info);
+      });
+
       this.sessions.set(sessionId, { sock, status: "connecting", jid: null, name: null });
       return { success: true, message: "Connecting..." };
     } catch (err) {
@@ -615,15 +644,38 @@ class SessionManager {
     if (!sess || sess.status !== "open") return { success: false, message: "Not connected" };
     try {
       const formattedJid = this._formatJid(jid);
-      const buffer = fs.readFileSync(filePath);
-      const mime = require("mime-types");
-      const detectedMime = mime.lookup(filePath) || "audio/mpeg";
-      const isVoice = filePath.endsWith(".ogg") || filePath.endsWith(".opus") || filePath.endsWith(".webm");
+      const isAlreadyOgg = filePath.endsWith(".ogg") || filePath.endsWith(".opus");
+      const needsConversion = !isAlreadyOgg && (filePath.endsWith(".webm") || filePath.endsWith(".mp4") || filePath.endsWith(".m4a") || filePath.endsWith(".mp3") || filePath.endsWith(".wav"));
+
+      let audioPath = filePath;
+      if (needsConversion) {
+        const oggPath = filePath.replace(/\.[^.]+$/, ".ogg");
+        await new Promise((resolve, reject) => {
+          execFile(ffmpegPath, [
+            "-y", "-i", filePath,
+            "-ac", "1",
+            "-ar", "48000",
+            "-c:a", "libopus",
+            "-b:a", "64k",
+            "-f", "ogg",
+            oggPath,
+          ], (err) => err ? reject(err) : resolve());
+        });
+        audioPath = oggPath;
+      }
+
+      const buffer = fs.readFileSync(audioPath);
       const sent = await sess.sock.sendMessage(formattedJid, {
         audio: buffer,
-        mimetype: isVoice ? "audio/ogg; codecs=opus" : detectedMime,
-        ptt: isVoice,
+        mimetype: "audio/ogg; codecs=opus",
+        ptt: true,
       });
+
+      // Cleanup converted file
+      if (needsConversion && audioPath !== filePath) {
+        fs.unlink(audioPath, () => {});
+      }
+
       const mediaUrl = `/uploads/${path.basename(filePath)}`;
       if (sent?.key?.id) this.sentMediaUrls.set(sent.key.id, mediaUrl);
       return { success: true, message: sent, mediaUrl };
@@ -823,6 +875,27 @@ class SessionManager {
         deduped.set(chat.jid, chat);
       }
     }
+
+    // Deduplicar por pushName: se @lid e @s.whatsapp.net têm mesmo pushName, manter só o phone
+    const phoneByName = new Map(); // pushName -> chat com @s.whatsapp.net
+    for (const chat of deduped.values()) {
+      if (chat.pushName && chat.jid && !String(chat.jid).endsWith("@lid") && !String(chat.jid).endsWith("@g.us")) {
+        phoneByName.set(chat.pushName, chat);
+      }
+    }
+    for (const [jid, chat] of deduped) {
+      if (String(jid).endsWith("@lid") && chat.pushName && phoneByName.has(chat.pushName)) {
+        // Mesclar timestamp mais recente no chat phone
+        const phoneChat = phoneByName.get(chat.pushName);
+        if (chat.lastTimestamp > phoneChat.lastTimestamp) {
+          phoneChat.lastMessage = chat.lastMessage;
+          phoneChat.lastTimestamp = chat.lastTimestamp;
+          phoneChat.lastSessionId = chat.lastSessionId;
+        }
+        deduped.delete(jid);
+      }
+    }
+
     chatList = Array.from(deduped.values()).sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 
     // Enriquecer com isGroup e groupName
@@ -971,26 +1044,109 @@ class SessionManager {
   }
 
   async _getGroupName(sessionId, groupJid) {
-    // Retornar do cache se disponível
-    if (this.groupMetadata.has(groupJid)) {
-      return this.groupMetadata.get(groupJid).subject;
+    const meta = await this._fetchAndCacheGroupMetadata(sessionId, groupJid);
+    return meta ? meta.subject : groupJid.split("@")[0];
+  }
+
+  async _fetchAndCacheGroupMetadata(sessionId, groupJid, forceRefresh = false) {
+    const cached = this.groupMetadata.get(groupJid);
+    // Retornar cache se fresco (< 5 min) e não forçado
+    if (cached && !forceRefresh && (Date.now() - cached.fetchedAt < 300000)) {
+      return cached;
     }
-    // Buscar do Baileys
+
     const sess = this.sessions.get(sessionId);
     if (!sess || !sess.sock || sess.status !== "open") {
-      return groupJid.split("@")[0];
+      return cached || null;
     }
+
     try {
       const metadata = await sess.sock.groupMetadata(groupJid);
-      this.groupMetadata.set(groupJid, {
-        subject: metadata.subject || groupJid.split("@")[0],
-        participants: (metadata.participants || []).length,
+
+      const participants = (metadata.participants || []).map(p => {
+        const rawJid = this._stripDeviceSuffix(p.id || p.jid || "");
+        let phone = null;
+        if (rawJid.endsWith("@s.whatsapp.net")) {
+          phone = rawJid.split("@")[0];
+        } else if (rawJid.endsWith("@lid")) {
+          const resolved = this.lidToPhone.get(rawJid);
+          if (resolved) phone = resolved.split("@")[0];
+        }
+        // Tentar jid do participante (Baileys pode fornecer)
+        if (!phone && p.jid && String(p.jid).endsWith("@s.whatsapp.net")) {
+          phone = this._stripDeviceSuffix(p.jid).split("@")[0];
+        }
+        return {
+          jid: rawJid,
+          phone,
+          admin: p.admin || null,
+          pushName: p.notify || p.name || null,
+        };
       });
-      return metadata.subject || groupJid.split("@")[0];
+
+      const groupData = {
+        subject: metadata.subject || groupJid.split("@")[0],
+        desc: metadata.desc || null,
+        announce: !!metadata.announce,
+        restrict: !!metadata.restrict,
+        owner: metadata.owner ? this._stripDeviceSuffix(metadata.owner) : null,
+        size: metadata.size || participants.length,
+        participants,
+        fetchedAt: Date.now(),
+      };
+
+      this.groupMetadata.set(groupJid, groupData);
+      return groupData;
     } catch (err) {
       console.error(`[${sessionId}] Group metadata error for ${groupJid}:`, err.message);
-      return groupJid.split("@")[0];
+      return cached || null;
     }
+  }
+
+  isUserAdminInGroup(groupJid) {
+    const cached = this.groupMetadata.get(groupJid);
+    if (!cached || !cached.participants) return false;
+
+    for (const [sessionId, sess] of this.sessions) {
+      if (sess.status !== "open" || !sess.sock?.user) continue;
+
+      const userJid = this._stripDeviceSuffix(sess.sock.user.id);
+      const userLid = sess.sock.user.lid ? this._stripDeviceSuffix(sess.sock.user.lid) : null;
+
+      for (const p of cached.participants) {
+        if (p.jid === userJid || (userLid && p.jid === userLid) ||
+            (p.phone && userJid.startsWith(p.phone))) {
+          if (p.admin === "admin" || p.admin === "superadmin") return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  _buildGroupInfoPayload(groupJid) {
+    const meta = this.groupMetadata.get(groupJid);
+    if (!meta) return null;
+    return {
+      jid: groupJid,
+      subject: meta.subject,
+      desc: meta.desc,
+      announce: meta.announce,
+      restrict: meta.restrict,
+      size: meta.size,
+      isAdmin: this.isUserAdminInGroup(groupJid),
+      participants: meta.participants,
+    };
+  }
+
+  async getGroupInfo(groupJid) {
+    let connectedSessionId = null;
+    for (const [id, s] of this.sessions) {
+      if (s.status === "open") { connectedSessionId = id; break; }
+    }
+    if (connectedSessionId) {
+      await this._fetchAndCacheGroupMetadata(connectedSessionId, groupJid);
+    }
+    return this._buildGroupInfoPayload(groupJid);
   }
 }
 
